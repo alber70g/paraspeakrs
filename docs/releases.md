@@ -66,28 +66,29 @@ run from the public `avencera/speakrs-models` repo, with no Hugging Face token.
 
 ```sh
 # 1. Build the zip from the current working tree.
-scripts/make-shipping-zip.sh /tmp/paraspeakrs-v0.2.0.zip
+TAG=v0.5.0   # the version being released
+scripts/make-shipping-zip.sh /tmp/paraspeakrs-$TAG.zip
 
 # 2. Tag and publish. `gh auth login` first if the token has expired.
-git tag -a v0.1.0 -m "speakrs diarization backend, trimmed dependencies"
-git push origin v0.1.0
-gh release create v0.2.0 /tmp/paraspeakrs-v0.2.0.zip \
-  --title "v0.1.0" \
-  --notes "speakrs is now the default diarization backend. Core install trimmed from 1.2 GB to 75 MB. See SHIPPING.md inside the zip for setup."
+git tag -a $TAG -m "<one-line summary>"
+git push origin $TAG
+gh release create $TAG /tmp/paraspeakrs-$TAG.zip \
+  --title "$TAG" \
+  --notes "<release notes>. See SHIPPING.md inside the zip for setup."
 ```
 
 Rebuild and attach a fresh asset rather than editing one in place:
 
 ```sh
-gh release upload v0.2.0 /tmp/paraspeakrs-v0.2.0.zip --clobber
+gh release upload $TAG /tmp/paraspeakrs-$TAG.zip --clobber
 ```
 
 ## Installing on the target machine
 
 ```sh
-# Authenticated download (private repo):
-gh release download v0.1.0 --repo alber70g/paraspeakrs
-unzip paraspeakrs-v0.2.0.zip
+TAG=v0.5.0   # the release to install
+gh release download $TAG --repo alber70g/paraspeakrs
+unzip paraspeakrs-$TAG.zip
 cd paraspeakrs
 
 # A downloaded zip is quarantined; macOS will refuse to run the bundled binary.

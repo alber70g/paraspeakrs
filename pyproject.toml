@@ -1,0 +1,93 @@
+[build-system]
+requires = ["hatchling>=1.26"]
+build-backend = "hatchling.build"
+
+[project]
+name = "paraspeakrs"
+version = "0.4.0"
+description = "Speaker-aware meeting transcription: Parakeet INT8 ASR with speakrs diarization"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Albert Groothedde", email = "516972+alber70g@users.noreply.github.com" }]
+keywords = ["transcription", "diarization", "asr", "parakeet", "speakrs", "meetings", "cli"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Multimedia :: Sound/Audio :: Speech",
+]
+requires-python = ">=3.11,<3.13"
+# The default diarization backend is the speakrs sidecar binary, shipped as its own
+# platform wheel, so the core install needs no ML framework at all. senko and the
+# denoising experiments each pull torch (~2-3 GB on macOS arm64) and live behind extras.
+dependencies = [
+  "fastapi>=0.115.0",
+  "httpx>=0.27.0",
+  "numpy>=1.26.0",
+  "pydantic>=2.8.0",
+  "python-multipart>=0.0.9",
+  # sherpa-onnx-core carries libonnxruntime, without which sherpa_onnx imports and
+  # then fails at dlopen. sherpa-onnx declares it, but its 1.13.2 *wheels* do not,
+  # so a resolver landing there produces an install that cannot transcribe at all.
+  # Both the floor and the explicit core dependency are deliberate.
+  "sherpa-onnx>=1.13.8",
+  "sherpa-onnx-core>=1.13.8",
+  "uvicorn>=0.30.0",
+  # Wheels exist only for the platform it is built for; elsewhere the tool still
+  # installs and falls back to --diar-backend senko or a hand-built SPEAKRS_BIN.
+  #
+  # A floor rather than an exact pin. The sidecar's interface is its command line,
+  # not a Python API, so lockstep versions buy nothing -- and an `==` pin on the
+  # version being released makes `uv lock` unresolvable in the checkout until that
+  # version is on PyPI, which is a bootstrap trap on every single release. The
+  # release workflow publishes the sidecar first, so a fresh install still gets the
+  # matching build. Raise this floor if the sidecar's CLI or JSON output changes.
+  'paraspeakrs-speakrs>=0.2.0; sys_platform == "darwin" and platform_machine == "arm64"',
+]
+
+[project.optional-dependencies]
+# Capped below 2.0: mcp 2.x renamed FastMCP to MCPServer and changed the API, so
+# mcp_server.py raises ModuleNotFoundError on import against it. Lift this together
+# with a migration, not on its own.
+mcp = ["mcp>=1.2.0,<2"]
+# rich is imported directly by tui/browse.py; it currently arrives via textual, but
+# an undeclared import is a dependency waiting to break.
+tui = ["textual>=0.60", "rich>=13.0"]
+# Only needed for --diar-backend senko; speakrs is the default and needs none of this.
+senko = ["senko", "torch==2.8.0", "torchaudio==2.8.0"]
+# Only for --sherpa-precision fp16, which converts the FP32 weights locally because
+# nobody publishes an FP16 build of Parakeet v3 in sherpa's layout. Not needed to *run*
+# an FP16 model, only to create one, so it stays out of the base install.
+fp16 = ["onnx>=1.16", "onnxconverter-common>=1.14"]
+# Only for the root-level preprocessing experiments (transcribe_variants.py et al).
+denoise = ["clearvoice>=0.1.2", "deepfilternet>=0.5.6", "torch==2.8.0", "torchaudio==2.8.0"]
+
+[project.scripts]
+paraspeakrs = "paraspeakrs.cli:main"
+
+[project.urls]
+Repository = "https://github.com/alber70g/paraspeakrs"
+Issues = "https://github.com/alber70g/paraspeakrs/issues"
+
+[dependency-groups]
+# pytest-asyncio drives Textual's own App.run_test() harness, which is the
+# only way to exercise the UI without a terminal.
+# textual and mcp are optional for users but required here: without them the suite
+# silently skips the TUI and MCP tests instead of running them.
+dev = ["pytest>=8.2.0", "pytest-asyncio>=0.23.0", "textual>=0.60", "rich>=13.0", "mcp>=1.2.0,<2"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/paraspeakrs"]
+
+[tool.hatch.build.targets.sdist]
+# The checkout carries hundreds of MB of scratch output and one-off experiments
+# that have no business in a release artifact.
+include = ["src/paraspeakrs", "tests", "README.md", "LICENSE", "CHANGELOG.md", "pyproject.toml"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+asyncio_mode = "auto"

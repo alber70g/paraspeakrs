@@ -1,0 +1,98 @@
+name: Publish to PyPI
+
+# Two distributions ship from this repo:
+#   paraspeakrs          - pure Python, one wheel for every platform
+#   paraspeakrs-speakrs  - the Rust diarization sidecar, macOS arm64 only
+# paraspeakrs pins paraspeakrs-speakrs exactly, so the sidecar must reach PyPI
+# first or the main package is unresolvable.
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v8.3.2
+      - run: uv sync --group dev
+      - run: uv run pytest -q
+
+  build-speakrs:
+    runs-on: macos-14 # arm64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v8.3.2
+      - uses: dtolnay/rust-toolchain@stable
+      # blas-static compiles OpenBLAS from source, which needs a Fortran compiler.
+      - run: brew install gcc
+      - name: Build the wheel
+        working-directory: packages/speakrs-diar
+        run: |
+          # OpenBLAS compiles its own Fortran sources with Homebrew's gfortran, but ld
+          # does not search Homebrew's gcc lib dir, so linking libgfortran fails with
+          # "ld: library 'gfortran' not found". Computed from brew so a gcc upgrade
+          # does not silently break this.
+          export LIBRARY_PATH="$(brew --prefix gcc)/lib/gcc/current:${LIBRARY_PATH:-}"
+          # --auditwheel=repair vendors gfortran's runtime (libgfortran, libquadmath,
+          # libgcc_s) into the wheel. blas-static alone is not self-contained: it still
+          # links those, and they live in the build machine's Homebrew.
+          uvx --from 'maturin>=1.7,<2.0' maturin build --release --auditwheel=repair --out dist
+      - name: Fail unless the wheel is self-contained
+        run: python3 scripts/check-speakrs-wheel.py packages/speakrs-diar/dist/*.whl
+      - uses: actions/upload-artifact@v4
+        with:
+          name: speakrs-wheel
+          path: packages/speakrs-diar/dist/*.whl
+
+  publish-speakrs:
+    needs: [test, build-speakrs]
+    runs-on: ubuntu-latest
+    # A distinct environment from the one the main package uses, not decoration:
+    # PyPI keys a pending trusted publisher on (owner, repo, workflow, environment)
+    # and refuses to register the same combination for a second project name.
+    environment: pypi-speakrs
+    permissions:
+      # A job-level permissions block REPLACES the defaults rather than adding to
+      # them, so id-token alone leaves the job without contents: read -- and
+      # actions/checkout then fails a private repo with "Repository not found".
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v8.3.2
+      - uses: actions/download-artifact@v4
+        with:
+          name: speakrs-wheel
+          path: dist
+      - name: Check the tag matches the sidecar version
+        run: |
+          VERSION=$(uv version --short --project packages/speakrs-diar)
+          [ "v$VERSION" = "$GITHUB_REF_NAME" ] || {
+            echo "Tag $GITHUB_REF_NAME does not match paraspeakrs-speakrs $VERSION" >&2
+            exit 1
+          }
+      - run: uv publish --trusted-publishing always dist/*.whl
+
+  publish:
+    needs: publish-speakrs
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      # A job-level permissions block REPLACES the defaults rather than adding to
+      # them, so id-token alone leaves the job without contents: read -- and
+      # actions/checkout then fails a private repo with "Repository not found".
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v8.3.2
+      - name: Check the tag matches the package version
+        run: |
+          VERSION=$(uv version --short)
+          [ "v$VERSION" = "$GITHUB_REF_NAME" ] || {
+            echo "Tag $GITHUB_REF_NAME does not match pyproject version $VERSION" >&2
+            exit 1
+          }
+      - run: uv build
+      - run: uv publish --trusted-publishing always

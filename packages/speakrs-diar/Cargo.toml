@@ -1,0 +1,35 @@
+[package]
+name = "speakrs-diar"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.89"
+description = "Sidecar binary that runs speakrs diarization and emits JSON for the Python pipeline"
+
+[[bin]]
+name = "speakrs-diar"
+path = "src/main.rs"
+
+[dependencies]
+# default-features = false drops speakrs' `default-linalg` so the BLAS backend is
+# chosen explicitly below; `online` is re-added because it was part of that set.
+speakrs = { version = "0.5", default-features = false, features = ["online"] }
+hound = "3.5"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[features]
+default = ["blas-system"]
+coreml = ["speakrs/coreml"]
+cuda = ["speakrs/cuda"]
+
+# Links Homebrew's prebuilt OpenBLAS. Fast to build, but the binary then depends on
+# dylibs under /opt/homebrew and will not run on a machine without them.
+blas-system = ["speakrs/openblas-system"]
+
+# Builds OpenBLAS from source into the binary (needs gfortran: `brew install gcc`).
+# Slower to build, but the result depends only on macOS system frameworks -- use
+# this for any binary that has to run on another machine.
+blas-static = ["speakrs/openblas-static"]
+
+[profile.release]
+opt-level = 3

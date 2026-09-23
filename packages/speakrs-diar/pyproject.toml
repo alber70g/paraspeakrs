@@ -1,0 +1,36 @@
+# Ships the speakrs-diar sidecar as a platform wheel so `uv tool install paraspeakrs`
+# needs no cargo, no Rust toolchain and no Homebrew. maturin's `bindings = "bin"` mode
+# installs the compiled binary next to the interpreter, which is the first place
+# paraspeakrs.config.default_speakrs_bin() looks.
+[build-system]
+requires = ["maturin>=1.7,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "paraspeakrs-speakrs"
+version = "0.4.0"
+description = "speakrs diarization sidecar binary for paraspeakrs"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Albert Groothedde", email = "516972+alber70g@users.noreply.github.com" }]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: Console",
+  "Operating System :: MacOS :: MacOS X",
+  "Topic :: Multimedia :: Sound/Audio :: Speech",
+]
+requires-python = ">=3.11"
+
+[project.urls]
+Repository = "https://github.com/alber70g/paraspeakrs"
+
+[tool.maturin]
+bindings = "bin"
+manifest-path = "Cargo.toml"
+# blas-static compiles OpenBLAS into the binary so it depends only on macOS system
+# frameworks; the default blas-system links Homebrew dylibs, which do not exist on a
+# machine that installed from PyPI. coreml is not optional: default_speakrs_mode()
+# returns "coreml" on darwin, so a binary without it fails on first run.
+no-default-features = true
+features = ["coreml", "blas-static"]

@@ -30,7 +30,9 @@ SHERPA_FP16_MODEL_NAME = "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-fp16"
 CHECKOUT_SPEAKRS_BIN = Path("packages/speakrs-diar/target/release/speakrs-diar")
 SPEAKRS_BIN_NAME = "speakrs-diar"
 
-APP_DIR_NAME = "fast-speaker-aware-meeting-transcriber"
+APP_DIR_NAME = "paraspeakrs"
+# The data directory's name up to 0.4.x, from before the project was renamed.
+OLD_APP_DIR_NAME = "fast-speaker-aware-meeting-transcriber"
 # Where the workspace used to live, relative to wherever you happened to launch from.
 LEGACY_WORKSPACE_DIR = Path("var")
 
@@ -42,9 +44,40 @@ def default_workspace_dir() -> Path:
     hand-labeled speaker identities and the transcripts themselves, neither of
     which can be regenerated if something sweeps the cache.
     """
+    return _data_root() / APP_DIR_NAME
+
+
+def _data_root() -> Path:
     base = os.getenv("XDG_DATA_HOME")
-    root = Path(base).expanduser() if base else Path.home() / ".local" / "share"
-    return root / APP_DIR_NAME
+    return Path(base).expanduser() if base else Path.home() / ".local" / "share"
+
+
+def migrate_workspace_dir() -> Path:
+    """Move a pre-0.5.0 data directory to its new name and return the one to use.
+
+    It holds transcripts and hand-named speakers, which cannot be regenerated, so
+    an upgrade must bring them along. When both directories exist nothing is
+    merged; when the move fails the old directory stays in use rather than
+    opening an empty workspace that would look like lost data. Messages go to
+    stderr because stdout carries the MCP stdio protocol.
+    """
+    old = _data_root() / OLD_APP_DIR_NAME
+    new = default_workspace_dir()
+    if not old.is_dir():
+        return new
+    if new.exists():
+        print(f"note: {old} is no longer used; the data in {new} is", file=sys.stderr)
+        return new
+    try:
+        old.rename(new)
+    except OSError as exc:
+        # Another process starting at the same moment may have moved it first.
+        if new.is_dir() and not old.exists():
+            return new
+        print(f"could not move {old} to {new} ({exc}); still using {old}", file=sys.stderr)
+        return old
+    print(f"moved {old} to {new}", file=sys.stderr)
+    return new
 
 
 def default_sherpa_model_dir(precision: SherpaPrecision = "fp32", workspace_dir: Path | None = None) -> Path:
@@ -162,7 +195,7 @@ class Settings:
         workspace_dir = (
             Path(os.environ["PARAKEET_WORKSPACE_DIR"]).expanduser().resolve()
             if os.getenv("PARAKEET_WORKSPACE_DIR")
-            else default_workspace_dir()
+            else migrate_workspace_dir()
         )
         return cls(
             device=device,

@@ -4,6 +4,18 @@ All notable changes to `paraspeakrs` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.5.0] — 2026-09-23
+
+### Changed
+
+- **The data directory is now `~/.local/share/paraspeakrs`** (or `$XDG_DATA_HOME/paraspeakrs`).
+  It used to be named after the project's old name, `fast-speaker-aware-meeting-transcriber`.
+  The first start of this version moves the old directory to the new name, with every job,
+  named voice, note, the queue and the downloaded ASR model, and says so on stderr. If both
+  directories exist nothing is merged: the new one is used and the old one is left
+  untouched. If the move fails, the old directory stays in use rather than opening an empty
+  workspace. `PARAKEET_WORKSPACE_DIR` is still honoured and is never moved.
+
 ## [0.4.1] — 2026-09-23
 
 ### Fixed

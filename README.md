@@ -20,7 +20,7 @@ uv tool install paraspeakrs --with 'paraspeakrs[tui]' --with 'paraspeakrs[mcp]'
 
 The first run asks which Parakeet ASR model you want (FP32, FP16 or INT8 — see
 [Model precision](#model-precision)) and downloads it, along with the speakrs diarization
-models (~315 MB) into `~/.local/share/fast-speaker-aware-meeting-transcriber`. Neither
+models (~315 MB) into `~/.local/share/paraspeakrs`. Neither
 needs an account or a token. `paraspeakrs fetch-models` pre-seeds the ASR model; see
 [Running without model downloads](#running-without-model-downloads) if your network
 blocks the download.
@@ -46,7 +46,7 @@ working directory, so `paraspeakrs` behaves the same wherever it is launched fro
 - Python 3.11 or 3.12, which `uv` will install and manage on its own.
 
 The ASR model is downloaded on first use into
-`~/.local/share/fast-speaker-aware-meeting-transcriber/models/`. It is a directory
+`~/.local/share/paraspeakrs/models/`. It is a directory
 containing `encoder.onnx`, `encoder.weights`, `decoder.onnx`, `joiner.onnx` and
 `tokens.txt` (or the `.int8.onnx` equivalents for the INT8 build); point
 `PARAKEET_SHERPA_MODEL_DIR` or `--sherpa-model-dir` at a copy you already have to skip
@@ -138,7 +138,7 @@ a source checkout — so a development checkout keeps working with a plain
 Each download prints the directory it is writing into, so a sideloaded copy can simply
 be placed there. The defaults are:
 
-- ASR: `~/.local/share/fast-speaker-aware-meeting-transcriber/models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3`
+- ASR: `~/.local/share/paraspeakrs/models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3`
   (with `-fp16` or `-int8` appended for those precisions)
   (under `$XDG_DATA_HOME` when that is set); `paraspeakrs fetch-models --help` prints the
   path this machine will use
@@ -841,10 +841,16 @@ that job reports so plainly — the transcript itself is unaffected.
 
 ### Where the workspace lives
 
-By default `$XDG_DATA_HOME/fast-speaker-aware-meeting-transcriber`, i.e.
-`~/.local/share/fast-speaker-aware-meeting-transcriber`. It is machine-global, so
+By default `$XDG_DATA_HOME/paraspeakrs`, i.e.
+`~/.local/share/paraspeakrs`. It is machine-global, so
 jobs and learned speakers are the same no matter which directory you launch from.
 `PARAKEET_WORKSPACE_DIR` overrides it and is resolved to an absolute path.
+
+Up to 0.4.x the default was `~/.local/share/fast-speaker-aware-meeting-transcriber`.
+The first start of 0.5.0 or later moves that directory to the new name and says so on
+stderr. If both directories exist, nothing is merged: the new one is used and the old one
+is left as it was. If the move fails, the old directory stays in use. An explicit
+`PARAKEET_WORKSPACE_DIR` is never moved.
 
 It sits under the data directory rather than a cache directory deliberately:
 `speaker-cache.json` holds the named voice prints, `ui-state.json` the browser's
@@ -859,7 +865,7 @@ Earlier versions used `./var` relative to the working directory. To carry that
 history over:
 
 ```sh
-DEST=~/.local/share/fast-speaker-aware-meeting-transcriber
+DEST=~/.local/share/paraspeakrs
 mkdir -p "$DEST"
 mv var/mcp-jobs "$DEST"/
 mv var/speaker-cache.json "$DEST"/     # the irreplaceable part

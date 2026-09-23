@@ -92,7 +92,7 @@ def test_workspace_defaults_to_an_absolute_xdg_data_dir(monkeypatch, tmp_path) -
 
     workspace = Settings.from_env().workspace_dir
     assert workspace.is_absolute()
-    assert workspace == tmp_path / "data" / "fast-speaker-aware-meeting-transcriber"
+    assert workspace == tmp_path / "data" / "paraspeakrs"
 
 
 def test_explicit_workspace_env_wins_over_the_default(monkeypatch, tmp_path) -> None:
@@ -104,3 +104,63 @@ def test_explicit_workspace_env_wins_over_the_default(monkeypatch, tmp_path) -> 
 def test_relative_workspace_is_resolved_not_kept_relative(tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     assert Settings(workspace_dir=Path("var")).workspace_dir == (tmp_path / "var").resolve()
+
+
+def _default_workspace(monkeypatch, tmp_path) -> Path:
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    monkeypatch.delenv("PARAKEET_WORKSPACE_DIR", raising=False)
+    return Settings.from_env().workspace_dir
+
+
+def test_data_from_before_the_rename_moves_to_the_new_directory(monkeypatch, tmp_path) -> None:
+    """Up to 0.4.x the data lived under the project's old name. Transcripts and
+    hand-named speakers cannot be regenerated, so an upgrade must carry them over
+    rather than start an empty workspace beside them."""
+    old = tmp_path / "data" / "fast-speaker-aware-meeting-transcriber"
+    (old / "mcp-jobs" / "job-1").mkdir(parents=True)
+    (old / "speaker-cache.json").write_text("{}", encoding="utf-8")
+
+    workspace = _default_workspace(monkeypatch, tmp_path)
+
+    assert workspace == tmp_path / "data" / "paraspeakrs"
+    assert (workspace / "mcp-jobs" / "job-1").is_dir()
+    assert (workspace / "speaker-cache.json").read_text(encoding="utf-8") == "{}"
+    assert not old.exists()
+
+
+def test_an_existing_new_directory_is_never_merged_with_the_old_one(monkeypatch, tmp_path) -> None:
+    """With both present there is no safe way to pick a winner per file, so the
+    old one is left exactly as it was for the user to sort out."""
+    old = tmp_path / "data" / "fast-speaker-aware-meeting-transcriber"
+    old.mkdir(parents=True)
+    (old / "speaker-cache.json").write_text("old", encoding="utf-8")
+    (tmp_path / "data" / "paraspeakrs").mkdir()
+
+    workspace = _default_workspace(monkeypatch, tmp_path)
+
+    assert workspace == tmp_path / "data" / "paraspeakrs"
+    assert (old / "speaker-cache.json").read_text(encoding="utf-8") == "old"
+
+
+def test_a_move_that_fails_keeps_using_the_old_directory(monkeypatch, tmp_path) -> None:
+    """Starting on an empty new directory would look exactly like lost data."""
+    old = tmp_path / "data" / "fast-speaker-aware-meeting-transcriber"
+    old.mkdir(parents=True)
+
+    def refuse(self, target):
+        raise PermissionError("read-only")
+
+    monkeypatch.setattr(Path, "rename", refuse)
+
+    assert _default_workspace(monkeypatch, tmp_path) == old
+
+
+def test_an_explicit_workspace_is_never_migrated(monkeypatch, tmp_path) -> None:
+    old = tmp_path / "data" / "fast-speaker-aware-meeting-transcriber"
+    old.mkdir(parents=True)
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    monkeypatch.setenv("PARAKEET_WORKSPACE_DIR", str(tmp_path / "chosen"))
+
+    Settings.from_env()
+
+    assert old.is_dir()

@@ -107,6 +107,6 @@ bin/speakrs-diar --mode coreml /tmp/tone.wav  # should emit JSON, not crash
 speaker names must be learned again on this machine.
 
 Jobs and the speaker cache are written to
-`~/.local/share/fast-speaker-aware-meeting-transcriber`, not into the checkout, so
+`~/.local/share/paraspeakrs`, not into the checkout, so
 they survive replacing this directory with a newer build. Override with
 `PARAKEET_WORKSPACE_DIR`.

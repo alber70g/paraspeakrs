@@ -27,7 +27,7 @@ from paraspeakrs.tui.browse import BrowserTree  # noqa: E402
 from paraspeakrs.tui.lines import LinesPanel  # noqa: E402
 from paraspeakrs.tui.note import NotePanel  # noqa: E402
 from paraspeakrs.tui.speakers import SpeakerPanel  # noqa: E402
-from paraspeakrs.tui.state import DONE, UiState  # noqa: E402
+from paraspeakrs.tui.state import DONE, FAILED, UiState  # noqa: E402
 from paraspeakrs.tui.voices import VoicesScreen  # noqa: E402
 
 
@@ -632,3 +632,43 @@ async def test_the_note_says_which_meeting_it_is_and_who_was_in_it(tmp_path):
         header = str(app.screen.query_one("#note-header").render())
         assert header.startswith("standup · ")
         assert header.endswith(" · Albert")
+
+
+class _PanickingDiarizer(ThreeSpeakerDiarizer):
+    def diarize(self, audio_path):
+        raise RuntimeError("speakrs-diar failed with exit code 101: thread 'main' panicked")
+
+
+def test_retrying_a_failed_recording_survives_a_restart(tmp_path):
+    """The reported crash: a diarizer panic, a retry of the same file, then the
+    app refusing to start again with DuplicateKey on the queue table."""
+    directory = _recordings(tmp_path)
+    wav = (directory / "standup.wav").resolve()
+
+    async def fail_then_retry() -> None:
+        app = _app(tmp_path)
+        app.workspace.pipeline.diarizer = _PanickingDiarizer()
+        async with app.run_test() as pilot:
+            app.screen._enqueue(wav)
+            await _until(pilot, lambda: app.state.queue[0].status == FAILED)
+            app.screen._enqueue(wav)
+            await _until(pilot, lambda: app.state.queue[0].status == FAILED)
+            assert len(app.state.queue) == 1
+
+    async def restart() -> None:
+        app = _app(tmp_path)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            assert app.screen.query_one("#queue").row_count == 1
+
+    asyncio.run(fail_then_retry())
+    asyncio.run(restart())
+
+
+async def _until(pilot, done, timeout: float = 5.0) -> None:
+    deadline = asyncio.get_running_loop().time() + timeout
+    while not done():
+        if asyncio.get_running_loop().time() > deadline:
+            raise AssertionError("condition not reached")
+        await pilot.pause(0.05)
+    await pilot.pause()

@@ -68,6 +68,8 @@ class DiarizeApp(App):
         self.workspace = workspace
         self.state = UiState.load(state_path)
         self.player = SamplePlayer()
+        # Set by main() once logging goes to a file; named in failure messages.
+        self.log_path: Path | None = None
 
     def on_mount(self) -> None:
         self.push_screen(HomeScreen())

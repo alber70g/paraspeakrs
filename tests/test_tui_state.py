@@ -145,3 +145,33 @@ def test_a_single_speaker_channel_answer_survives_a_restart(tmp_path):
     state.enqueue(Path("/rec/call.wav"), ["L"])
 
     assert UiState.load(path).queue[0].single_speaker_channels == ["L"]
+
+
+def test_requeuing_a_failed_recording_retries_it_instead_of_adding_a_second(tmp_path):
+    """The queue table keys rows by path. A retry that appended a second entry
+    for a failed file crashed the table with DuplicateKey, and because the
+    queue is saved first, every later start crashed the same way."""
+    state = UiState.load(tmp_path / "ui.json")
+    item = state.enqueue(tmp_path / "a.wav", ["L"])
+    state.mark(item, FAILED, error="speakrs-diar failed with exit code 101")
+
+    retried = state.enqueue(tmp_path / "a.wav", ["R"])
+
+    assert retried is item
+    assert len(state.queue) == 1
+    assert (item.status, item.error, item.single_speaker_channels) == (WAITING, None, ["R"])
+
+
+def test_a_state_file_with_duplicate_paths_still_loads_one_row_per_path(tmp_path):
+    """Files written before the retry fix can hold the same path twice; they
+    must heal on load instead of crashing the UI on every start."""
+    path = tmp_path / "ui.json"
+    wav = str(tmp_path / "a.wav")
+    path.write_text(
+        json.dumps({"queue": [{"path": wav, "status": FAILED, "error": "boom"}, {"path": wav, "status": WAITING}]}),
+        encoding="utf-8",
+    )
+
+    queue = UiState.load(path).queue
+
+    assert [(item.path.name, item.status) for item in queue] == [("a.wav", WAITING)]

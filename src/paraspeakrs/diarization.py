@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from pathlib import Path
 from collections.abc import Collection
@@ -217,7 +218,10 @@ class SpeakrsDiarizer:
             announce_speakrs_models_dir()
         cmd.append(str(audio_path))
 
-        completed = self.runner(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        # A panic (exit 101) in speakrs or onnxruntime is only diagnosable with
+        # its backtrace; a user's own RUST_BACKTRACE setting still wins.
+        env = {"RUST_BACKTRACE": "1", **os.environ}
+        completed = self.runner(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
         if completed.returncode != 0:
             raise RuntimeError(
                 f"speakrs-diar failed with exit code {completed.returncode}: {(completed.stderr or '').strip()}"

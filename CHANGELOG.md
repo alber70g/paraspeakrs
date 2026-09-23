@@ -4,6 +4,23 @@ All notable changes to `paraspeakrs` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.4.1] — 2026-09-23
+
+### Fixed
+
+- **Retrying a failed recording no longer breaks the TUI.** Queuing a file that had failed
+  added a second queue entry for the same path, which crashed the queue table with
+  `DuplicateKey` right away and again on every later start. A retry now reuses the failed
+  entry, and a `ui-state.json` that already holds duplicates is repaired when it loads.
+
+### Added
+
+- **Debug information for failed runs.** The TUI writes to `<workspace>/logs/tui.log`,
+  including the full traceback of every failed transcription. Pressing enter on a failed queue
+  row shows the error (the row itself cuts it off at 40 characters) and the log's path.
+  `speakrs-diar` now runs with `RUST_BACKTRACE=1`, so a panic (exit code 101) records
+  where it happened.
+
 ## [0.4.0] — 2026-09-23
 
 ### Added

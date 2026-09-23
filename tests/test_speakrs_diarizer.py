@@ -107,6 +107,22 @@ def test_nonzero_exit_reports_stderr(tmp_path):
         diarizer.diarize(tmp_path / "audio.wav")
 
 
+def test_the_sidecar_runs_with_rust_backtraces_on(tmp_path):
+    """Exit code 101 is a Rust panic inside speakrs or onnxruntime. Its message
+    alone rarely says where, and the failure happens on a machine we cannot
+    reach, so the backtrace has to be in the stderr we keep."""
+    seen = {}
+    base = _runner()
+
+    def runner(cmd, **kwargs):
+        seen.update(kwargs.get("env") or {})
+        return base(cmd, **kwargs)
+
+    SpeakrsDiarizer(FakeAudio(), binary=Path("speakrs-diar"), runner=runner).diarize(tmp_path / "audio.wav")
+
+    assert seen.get("RUST_BACKTRACE") == "1"
+
+
 def test_malformed_json_is_rejected(tmp_path):
     diarizer = SpeakrsDiarizer(
         FakeAudio(), binary=Path("speakrs-diar"), runner=_runner(stdout="not json")

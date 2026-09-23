@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from textual import events, on, work
@@ -27,6 +28,8 @@ NOT_A_RECORDING = "no recording selected"
 
 #: The answers to "is a channel one person?", as the channels each one names.
 SINGLE_SPEAKER_CHOICES = {"none": [], "L": ["L"], "R": ["R"], "LR": ["L", "R"]}
+
+LOGGER = logging.getLogger(__name__)
 
 
 def _nav(key: str, action: str, description: str) -> list[Binding]:
@@ -467,6 +470,12 @@ class HomeScreen(Screen):
         if item is None:
             return
         job = self._jobs.get(item.job_id or "") or self._job_for_path(item.path)
+        if job is None and item.status == FAILED:
+            # The row shows 40 characters; the part that says why is after them.
+            where = f"\n\nfull log: {self.app.log_path}" if self.app.log_path else ""
+            head = "\n".join((item.error or "").splitlines()[:4])
+            self.notify(f"{head}{where}\n\n↵ on the file again to retry", severity="error", timeout=30)
+            return
         if job is None:
             self.notify(f"{item.path.name} is still {self._status_text(item)}")
             return
@@ -507,6 +516,7 @@ class HomeScreen(Screen):
                     single_speaker_channels=frozenset(item.single_speaker_channels),
                 )
             except Exception as exc:  # noqa: BLE001
+                LOGGER.exception("transcribing %s failed", item.path)
                 state.mark(item, FAILED, error=str(exc))
             else:
                 state.mark(item, DONE, job_id=summary.job_id)

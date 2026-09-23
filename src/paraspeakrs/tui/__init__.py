@@ -6,6 +6,7 @@ from ..config import Settings
 from ..factory import build_pipeline, describe_asr
 from ..labeling import LabelingWorkspace
 from ..mcp_store import ArtifactStore
+from .logfile import configure_logging
 
 
 def main() -> None:
@@ -41,6 +42,7 @@ def main() -> None:
     workspace = LabelingWorkspace(pipeline, store)
 
     app = DiarizeApp(workspace, settings.workspace_dir / "ui-state.json")
+    app.log_path = configure_logging(settings.workspace_dir)
     # The startup line on stderr is gone once the TUI takes the screen; the header stays.
     app.sub_title = f"ASR: {describe_asr(pipeline.asr)}"
     app.run()

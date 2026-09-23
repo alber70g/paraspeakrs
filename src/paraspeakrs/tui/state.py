@@ -90,8 +90,12 @@ class UiState:
                 item = QueueItem.from_dict(entry)
                 # A finished item has become a job and is listed as one; only
                 # failures still need somewhere to be seen.
-                if item.status != DONE:
-                    state.queue.append(item)
+                if item.status == DONE:
+                    continue
+                # Older versions queued a failed file a second time on retry; the
+                # table keys rows by path, so keep only the later entry.
+                state.queue = [kept for kept in state.queue if kept.path != item.path]
+                state.queue.append(item)
         return state
 
     def save(self) -> None:
@@ -121,8 +125,16 @@ class UiState:
         because the fingerprint check only reuses jobs that already exist.
         """
         path = Path(path)
-        if any(item.path == path and item.status in (WAITING, RUNNING) for item in self.queue):
+        existing = next((item for item in self.queue if item.path == path), None)
+        if existing is not None and existing.status in (WAITING, RUNNING):
             return None
+        if existing is not None:
+            # A failed file is retried in place: a second entry for the same path
+            # would give the queue table two rows with one key.
+            existing.status, existing.error = WAITING, None
+            existing.single_speaker_channels = list(single_speaker_channels or [])
+            self.save()
+            return existing
         item = QueueItem(path=path, single_speaker_channels=list(single_speaker_channels or []))
         self.queue.append(item)
         self.save()

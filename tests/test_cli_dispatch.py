@@ -66,3 +66,37 @@ def test_version_flag_reports_the_package_version(monkeypatch, capsys):
 
     assert excinfo.value.code == 0
     assert "paraspeakrs" in capsys.readouterr().out
+
+
+def test_agent_help_prints_the_packaged_guide(monkeypatch, capsys):
+    """The guide is read from the installed package, so it matches the installed CLI."""
+    monkeypatch.setattr(cli.sys, "argv", ["paraspeakrs", "agent", "help"])
+
+    cli._main()
+
+    out = capsys.readouterr().out
+    assert out.startswith("# paraspeakrs agent guide")
+    assert "paraspeakrs agent apply" in out
+
+
+@pytest.mark.parametrize(
+    ("argv", "expected"),
+    [
+        (["agent", "transcribe", "m.m4a", "-o", "out"], ("prepare", "m.m4a", "out")),
+        (["agent", "apply", "out", "--dry-run"], ("apply", "out", True)),
+    ],
+)
+def test_agent_commands_reach_the_directory_flow(monkeypatch, capsys, argv, expected):
+    import json
+
+    from paraspeakrs import agent_dir
+
+    monkeypatch.setattr(cli, "build_pipeline", lambda settings: None)
+    monkeypatch.setattr(agent_dir, "prepare", lambda ws, audio, out: {"call": ["prepare", str(audio), str(out)]})
+    monkeypatch.setattr(agent_dir, "apply", lambda ws, out, dry_run: {"call": ["apply", str(out), dry_run]})
+    monkeypatch.setattr(cli.sys, "argv", ["paraspeakrs", *argv])
+
+    cli._main()
+
+    # stdout is pure JSON, so an agent can parse it without scraping.
+    assert tuple(json.loads(capsys.readouterr().out)["call"]) == expected

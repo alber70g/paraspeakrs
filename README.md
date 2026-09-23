@@ -10,6 +10,7 @@ brew install ffmpeg                  # ffmpeg and ffprobe must be on PATH
 paraspeakrs run --txt meeting.m4a    # transcribe; models download themselves on first run
 paraspeakrs tui                      # the terminal UI (add --with 'paraspeakrs[tui]')
 paraspeakrs mcp                      # the MCP server (add --with 'paraspeakrs[mcp]')
+paraspeakrs agent help               # the file-based flow for coding agents, no MCP needed
 ```
 
 To install with the optional interfaces in one go:
@@ -477,6 +478,22 @@ paraspeakrs label-dir $AudioDir `
 # Run the test suite.
 uv run pytest
 ```
+
+## Agent CLI
+
+A coding agent can drive the whole flow from the command line, without the MCP
+server. `agent transcribe` writes a directory with the transcript and one audio
+sample per speaker. The user names the speakers by renaming the samples. Then
+`agent apply` writes the names into the transcript:
+
+```bash
+paraspeakrs agent transcribe meeting.m4a -o out/
+# out/SPEAKER_00__NAME-ME.wav  ->  rename to  out/SPEAKER_00__Alice.wav
+paraspeakrs agent apply out/
+```
+
+Both commands print JSON. `paraspeakrs agent help` prints the complete guide
+for agents: what renaming, merging and deleting a sample mean.
 
 ## MCP server
 

@@ -6,6 +6,17 @@ All notable changes to `paraspeakrs` are documented here. The format follows
 
 ## [0.5.0] — 2026-09-23
 
+### Added
+
+- **`paraspeakrs agent`: speaker naming for coding agents, through files, with no MCP
+  server.** `agent transcribe <audio> -o <dir>` writes the transcript and one sample per
+  speaker, `<ID>__NAME-ME.wav`. Each sample stitches several takes of that speaker, at least
+  8 s where they said that much, separated by a beep. A voice the library recognizes arrives as `<ID>__Alice_0.82.wav`.
+  The user renames the samples to name the speakers: the same name twice merges them, and
+  deleting a sample drops that speaker's lines. `agent apply <dir>` writes the names into
+  the transcript and can be re-run after further renames. `--dry-run` shows what would
+  change first. `agent help` prints the guide for agents. Both commands print JSON.
+
 ### Changed
 
 - **The data directory is now `~/.local/share/paraspeakrs`** (or `$XDG_DATA_HOME/paraspeakrs`).

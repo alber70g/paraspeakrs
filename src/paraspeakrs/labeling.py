@@ -8,7 +8,7 @@ from uuid import uuid4
 from .mcp_store import ArtifactStore, apply_labels, fingerprint_file, talk_seconds
 from .models import PipelineArtifacts
 from .pipeline import ProgressCallback, TranscriptionPipeline
-from .snippets import export_label_snippets
+from .snippets import export_label_snippets, montage_segments, write_montage
 from .transcript_txt import line_key, render_frontmatter, render_txt, utterances
 
 
@@ -184,6 +184,26 @@ class LabelingWorkspace:
             raise ValueError(f"no usable audio sample for speaker {speaker_id!r}")
         return paths[0].resolve()
 
+    def speaker_montages(self, job_id: str, targets: dict[str, Path]) -> dict[str, Path]:
+        """Write one montage per speaker in ``targets``, cut from a single source.
+
+        A pruned job rebuilds its audio from the original recording, which costs
+        a full decode; doing that once rather than once per speaker is the point
+        of taking them all together.
+        """
+        artifacts = self._load(job_id)
+        for speaker_id in targets:
+            self._require_speaker(job_id, speaker_id)
+        audio_path, temporary = self._sample_source(artifacts, job_id)
+        try:
+            for speaker_id, target in targets.items():
+                segments = [seg for seg in artifacts.diarization if seg.speaker == speaker_id]
+                write_montage(self.pipeline.audio, audio_path, target, montage_segments(segments))
+        finally:
+            if temporary:
+                audio_path.unlink(missing_ok=True)
+        return targets
+
     def _sample_source(self, artifacts: PipelineArtifacts, job_id: str) -> tuple[Path, bool]:
         """Audio to cut a snippet from, rebuilt from the original if pruned.
 
@@ -298,6 +318,17 @@ class LabelingWorkspace:
             excluded.append(speaker_id)
         artifacts = artifacts.model_copy(update={"excluded_speakers": excluded})
         self.store.save(job_id, artifacts)
+        return self._speaker_rows(artifacts)
+
+    def set_speaker_excluded(self, job_id: str, speaker_id: str, excluded: bool) -> list[SpeakerRow]:
+        """Remove a speaker from the transcript or put them back, stated rather than toggled.
+
+        The agent flow re-applies a whole directory's state on every run, which a
+        toggle cannot do without first reading which way it currently points.
+        """
+        artifacts = self._require_speaker(job_id, speaker_id)
+        if (speaker_id in artifacts.excluded_speakers) != excluded:
+            return self.toggle_speaker_excluded(job_id, speaker_id)
         return self._speaker_rows(artifacts)
 
     def toggle_line_excluded(self, job_id: str, speaker_id: str, start: float) -> bool:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -75,7 +76,26 @@ def _main() -> None:
     label_parser.add_argument("audio_dir", type=Path)
     label_parser.add_argument("--label-probe-seconds", type=float, default=300.0)
     label_parser.add_argument("--transcribe-after-label", action="store_true")
+    agent_parser = subparsers.add_parser(
+        "agent", help="file-based transcribe-and-name flow for coding agents; see `paraspeakrs agent help`"
+    )
+    agent_commands = agent_parser.add_subparsers(dest="agent_command", required=True)
+    agent_commands.add_parser("help", help="print the guide for driving this flow")
+    agent_transcribe = agent_commands.add_parser("transcribe", help="transcribe into a directory of speaker samples")
+    _add_common(agent_transcribe, env)
+    agent_transcribe.add_argument("audio_path", type=Path)
+    agent_transcribe.add_argument("-o", "--out-dir", type=Path, required=True)
+    agent_apply = agent_commands.add_parser("apply", help="apply the names given by renaming the samples")
+    _add_common(agent_apply, env)
+    agent_apply.add_argument("out_dir", type=Path)
+    agent_apply.add_argument("--dry-run", action="store_true", help="report what would change, change nothing")
     args = parser.parse_args()
+
+    if args.command == "agent" and args.agent_command == "help":
+        from importlib.resources import files
+
+        print(files("paraspeakrs").joinpath("agent_guide.md").read_text(encoding="utf-8"), end="")
+        return
 
     # These three do not take the pipeline flags, so they are dispatched before
     # _settings_from_args goes looking for them.
@@ -125,6 +145,18 @@ def _main() -> None:
             print(workspace.transcript_text(summary.job_id), end="")
         else:
             print(workspace.store.load(summary.job_id).result.model_dump_json(indent=2))
+    elif args.command == "agent":
+        from . import agent_dir
+
+        workspace = LabelingWorkspace(
+            build_pipeline(settings),
+            ArtifactStore(settings.workspace_dir / "mcp-jobs"),
+        )
+        if args.agent_command == "transcribe":
+            report = agent_dir.prepare(workspace, args.audio_path, args.out_dir)
+        else:
+            report = agent_dir.apply(workspace, args.out_dir, dry_run=args.dry_run)
+        print(json.dumps(report, indent=2, ensure_ascii=False))
     elif args.command == "label-dir":
         _label_dir(
             args.audio_dir,

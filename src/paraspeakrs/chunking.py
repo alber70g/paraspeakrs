@@ -20,7 +20,7 @@ def build_chunks(
     if duration_seconds <= 0:
         return []
     if not diarization:
-        return _fixed_chunks(duration_seconds, target_seconds, overlap_seconds)
+        return _fixed_chunks(0.0, duration_seconds, target_seconds, overlap_seconds)
 
     chunks: list[Chunk] = []
     start = max(0.0, diarization[0].start)
@@ -38,17 +38,27 @@ def build_chunks(
         chunks.insert(0, Chunk(0.0, min(chunks[0].start, duration_seconds)))
     if chunks and chunks[-1].end < duration_seconds:
         chunks.append(Chunk(max(0.0, chunks[-1].end - overlap_seconds), duration_seconds))
-    return chunks
+    # Chunks only close between diarization segments, so a silent lead-in or tail,
+    # a long gap between turns, or one long monologue still comes out as a single
+    # chunk of any length. ASR memory grows quadratically with chunk length (a
+    # 400 s silent tail peaked at 8.6 GB), so the target is enforced as a ceiling.
+    capped: list[Chunk] = []
+    for chunk in chunks:
+        if chunk.end - chunk.start > target_seconds:
+            capped.extend(_fixed_chunks(chunk.start, chunk.end, target_seconds, overlap_seconds))
+        else:
+            capped.append(chunk)
+    return capped
 
 
-def _fixed_chunks(duration_seconds: float, target_seconds: float, overlap_seconds: float) -> list[Chunk]:
+def _fixed_chunks(span_start: float, span_end: float, target_seconds: float, overlap_seconds: float) -> list[Chunk]:
     chunks: list[Chunk] = []
-    start = 0.0
+    start = span_start
     step = max(1.0, target_seconds - overlap_seconds)
-    while start < duration_seconds:
-        end = min(duration_seconds, start + target_seconds)
+    while start < span_end:
+        end = min(span_end, start + target_seconds)
         chunks.append(Chunk(start, end))
-        if end == duration_seconds:
+        if end == span_end:
             break
         start += step
     return chunks

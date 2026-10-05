@@ -27,6 +27,15 @@ All notable changes to `paraspeakrs` are documented here. The format follows
   untouched. If the move fails, the old directory stays in use rather than opening an empty
   workspace. `PARAKEET_WORKSPACE_DIR` is still honoured and is never moved.
 
+### Fixed
+
+- **ASR chunks no longer grow past the 90 s target.** Chunks closed only between speaker
+  turns, so a silent lead-in or tail, a long gap between turns or one long monologue was
+  transcribed as a single chunk of any length. Memory grows quadratically with chunk length:
+  a 59-minute meeting with 6.6 silent minutes at the end peaked at 8.5 GB instead of 3.5 GB,
+  and decoding took 83 s instead of 62 s. Such stretches are now split into fixed windows
+  with the usual overlap.
+
 ## [0.4.1] — 2026-09-23
 
 ### Fixed

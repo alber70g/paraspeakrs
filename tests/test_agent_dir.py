@@ -442,6 +442,29 @@ def test_unattributed_segments_have_a_null_speaker(tmp_path):
     assert "UNKNOWN" not in {s["id"] for s in data["speakers"]}
 
 
+def test_reuse_cuts_samples_from_the_new_copy_when_the_first_is_gone(tmp_path):
+    """MacParakeet hands paraspeakrs a temporary WAV and deletes it afterwards.
+    Rerunning the same meeting reuses the job by fingerprint, and the samples
+    must come from the identical file just passed in, not the deleted one."""
+    workspace = _workspace(tmp_path, asr=FailingAsr())
+    first = tmp_path / "first.wav"
+    first.write_bytes(b"same audio")
+    agent_dir.diarize(workspace, first, tmp_path / "out1")
+    first.unlink()
+    second = tmp_path / "second.wav"
+    second.write_bytes(b"same audio")
+
+    result = agent_dir.diarize(workspace, second, tmp_path / "out2")
+
+    assert result["reused"] is True
+    assert {row["file"] for row in result["speakers"]} == {
+        "SPEAKER_00__NAME-ME.wav",
+        "SPEAKER_01__Alice_1.00.wav",
+        "SPEAKER_02__NAME-ME.wav",
+    }
+    assert all((tmp_path / "out2" / row["file"]).is_file() for row in result["speakers"])
+
+
 def test_diarize_with_no_speech_still_writes_an_empty_result(tmp_path):
     """Silent audio (a meeting where nobody spoke on the other side) is a normal
     outcome, not a failure: the caller must get an empty diarization.json

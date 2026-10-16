@@ -171,6 +171,13 @@ class LabelingWorkspace:
             existing = self.store.find_by_fingerprint(fingerprint, require_transcribed=transcribe)
             if existing is not None:
                 job_id, artifacts = existing
+                # Identical bytes, so the file just passed in can stand in for a
+                # recording that was moved or deleted (MacParakeet passes a
+                # temporary WAV). Samples are cut from it.
+                stored = artifacts.source_path
+                if stored is None or not Path(stored).is_file():
+                    artifacts = artifacts.model_copy(update={"source_path": source.resolve()})
+                    self.store.save(job_id, artifacts)
                 if progress is not None:
                     progress("reuse", f"reusing job {job_id} for identical audio", 100)
                 return self._summary(job_id, artifacts, reused=True)

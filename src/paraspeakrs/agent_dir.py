@@ -89,6 +89,9 @@ def _stage(workspace: LabelingWorkspace, summary: JobSummary, out_dir: Path, *, 
     """
     job_id = summary.job_id
     hints = _hints(workspace, job_id)
+    # Writing a sample used to be what created the directory, so audio with no
+    # speakers at all crashed on the manifest below.
+    out_dir.mkdir(parents=True, exist_ok=True)
 
     speakers, files = {}, {}
     for row in summary.speakers:

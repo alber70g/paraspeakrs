@@ -440,3 +440,35 @@ def test_unattributed_segments_have_a_null_speaker(tmp_path):
     # Diarization only ever produced SPEAKER_00/01/02; the pseudo-speaker must
     # never be listed as though a person could rename or exclude it.
     assert "UNKNOWN" not in {s["id"] for s in data["speakers"]}
+
+
+def test_diarize_with_no_speech_still_writes_an_empty_result(tmp_path):
+    """Silent audio (a meeting where nobody spoke on the other side) is a normal
+    outcome, not a failure: the caller must get an empty diarization.json
+    rather than a crash it would report as broken speaker detection."""
+
+    class NoSpeakers:
+        name = "fake"
+
+        def diarize(self, audio_path):
+            return []
+
+    pipeline = TranscriptionPipeline(
+        diarizer=NoSpeakers(),
+        asr=FailingAsr(),
+        audio=Audio(),
+        speaker_cache=SpeakerCache(tmp_path / "speaker-cache.json"),
+        embedding_extractor=Embeddings(),
+    )
+    workspace = LabelingWorkspace(pipeline, ArtifactStore(tmp_path / "jobs"))
+    source = tmp_path / "silence.m4a"
+    source.write_bytes(b"")
+    out = tmp_path / "out"
+
+    result = agent_dir.diarize(workspace, source, out)
+
+    assert result["speakers"] == []
+    data = _diarization_json(out)
+    assert data["speakers"] == []
+    assert data["turns"] == []
+    assert (out / "manifest.json").is_file()

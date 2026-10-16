@@ -74,6 +74,12 @@ class PipelineArtifacts(BaseModel):
     # be undone; only the rendered transcript leaves them out.
     excluded_speakers: list[str] = Field(default_factory=list)
     excluded_lines: list[tuple[str, float]] = Field(default_factory=list)
+    # False for a job made by `agent diarize`: diarization, embeddings and
+    # speaker-label resolution ran, but no ASR did, so result.segments is empty
+    # and there is no transcript. True (the default) for every job written
+    # before this field existed, and for every job `agent transcribe`/`run`
+    # produces.
+    transcribed: bool = True
 
 
 class LabelingArtifacts(BaseModel):

@@ -85,6 +85,12 @@ def _main() -> None:
     _add_common(agent_transcribe, env)
     agent_transcribe.add_argument("audio_path", type=Path)
     agent_transcribe.add_argument("-o", "--out-dir", type=Path, required=True)
+    agent_diarize = agent_commands.add_parser(
+        "diarize", help="diarize only (no ASR) into a directory of speaker samples"
+    )
+    _add_common(agent_diarize, env)
+    agent_diarize.add_argument("audio_path", type=Path)
+    agent_diarize.add_argument("-o", "--out-dir", type=Path, required=True)
     agent_apply = agent_commands.add_parser("apply", help="apply the names given by renaming the samples")
     _add_common(agent_apply, env)
     agent_apply.add_argument("out_dir", type=Path)
@@ -148,12 +154,16 @@ def _main() -> None:
     elif args.command == "agent":
         from . import agent_dir
 
+        # Only `transcribe` runs ASR; `diarize` must not load, download or ask
+        # about the model, and `apply` never transcribes either way.
         workspace = LabelingWorkspace(
-            build_pipeline(settings),
+            build_pipeline(settings, need_asr=args.agent_command == "transcribe"),
             ArtifactStore(settings.workspace_dir / "mcp-jobs"),
         )
         if args.agent_command == "transcribe":
             report = agent_dir.prepare(workspace, args.audio_path, args.out_dir)
+        elif args.agent_command == "diarize":
+            report = agent_dir.diarize(workspace, args.audio_path, args.out_dir)
         else:
             report = agent_dir.apply(workspace, args.out_dir, dry_run=args.dry_run)
         print(json.dumps(report, indent=2, ensure_ascii=False))

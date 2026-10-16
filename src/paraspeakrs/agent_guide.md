@@ -48,6 +48,25 @@ The part after `__` in each filename is the whole interface:
 Never change the part before `__`. A file without a known speaker ID, an empty
 name, or two files for one speaker makes `apply` fail and change nothing.
 
+### 1b. Or: diarize only, no transcript
+
+    paraspeakrs agent diarize <audio-file> -o <out-dir>
+
+For a caller that does its own speech recognition (e.g. MacParakeet) and only
+needs speakers, name suggestions and samples from paraspeakrs. Runs no ASR -
+it never loads, downloads or asks about the ASR model, and works with no
+model installed. The directory gets the same `NEXT_STEPS.md`, `manifest.json`
+and one sample per speaker as `agent transcribe`, plus `diarization.json`
+instead of `transcript.txt`/`transcript.json`:
+
+| File | What it is |
+|---|---|
+| `diarization.json` | speakers (same shape as in `transcript.json`) and `turns`: `{"speaker", "start", "end"}` for each diarized turn, in time order |
+
+`agent apply` works the same on a directory made by `agent diarize`: it
+rewrites `diarization.json` with the names instead of `transcript.txt`/
+`transcript.json`, and its JSON output has no `lines` key.
+
 ### 3. Apply the names
 
     paraspeakrs agent apply <out-dir> --dry-run   # show what would happen

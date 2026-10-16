@@ -241,6 +241,98 @@ def test_force_re_transcribes_identical_audio(tmp_path: Path) -> None:
     assert len(workspace.list_jobs()) == 2
 
 
+class FailingAsr:
+    """Fails loudly if ASR ever runs - a diarize-only job must never reach it."""
+
+    def transcribe(self, audio_path):
+        raise AssertionError("ASR must not run for a diarize-only job")
+
+
+def test_diarize_never_calls_asr_and_stores_an_untranscribed_job(tmp_path: Path) -> None:
+    pipeline = TranscriptionPipeline(
+        diarizer=FakeDiarizer(),
+        asr=FailingAsr(),
+        audio=FakeAudio(),
+        speaker_cache=SpeakerCache(tmp_path / "speaker-cache.json"),
+        embedding_extractor=FakeEmbeddings(),
+    )
+    workspace = LabelingWorkspace(pipeline, ArtifactStore(tmp_path / "jobs"))
+    audio = _audio_file(tmp_path)
+
+    summary = workspace.diarize(audio)
+
+    artifacts = workspace.store.load(summary.job_id)
+    assert artifacts.transcribed is False
+    assert artifacts.result.segments == []
+    assert summary.num_speakers == 1
+
+
+def test_transcribe_does_not_reuse_a_diarize_only_job(tmp_path: Path) -> None:
+    """A diarize-only job has no transcript; `transcribe` must run the full
+    pipeline rather than hand one back as though it were a real transcription."""
+    diarizer = CountingDiarizer()
+    workspace = _counting_workspace(tmp_path, diarizer)
+    audio = _audio_file(tmp_path)
+    diarize_only = workspace.diarize(audio)
+
+    full = workspace.transcribe(audio)
+
+    assert full.job_id != diarize_only.job_id
+    assert full.reused is False
+    assert diarizer.calls == 2
+    assert workspace.store.load(full.job_id).transcribed is True
+
+
+def test_diarize_reuses_a_full_transcribe_job(tmp_path: Path) -> None:
+    """A full job's diarization is just as usable for `diarize`, so unlike
+    `transcribe` it reuses it rather than diarizing again."""
+    diarizer = CountingDiarizer()
+    workspace = _counting_workspace(tmp_path, diarizer)
+    audio = _audio_file(tmp_path)
+    full = workspace.transcribe(audio)
+
+    reused = workspace.diarize(audio)
+
+    assert reused.job_id == full.job_id
+    assert reused.reused is True
+    assert diarizer.calls == 1
+
+
+def test_write_diarization_json_sorts_turns_and_drops_excluded_speakers(tmp_path: Path) -> None:
+    class UnorderedDiarizer(FakeDiarizer):
+        def diarize(self, audio_path):
+            return [
+                DiarizationSegment(speaker="SPEAKER_01", start=5.0, end=6.0),
+                DiarizationSegment(speaker="SPEAKER_00", start=0.0, end=2.0),
+                DiarizationSegment(speaker="SPEAKER_00", start=5.0, end=5.5),
+            ]
+
+    class TwoEmbeddings:
+        def extract(self, audio_path, diarization):
+            return {"SPEAKER_00": [1.0, 0.0, 0.0], "SPEAKER_01": [0.0, 1.0, 0.0]}
+
+    pipeline = TranscriptionPipeline(
+        diarizer=UnorderedDiarizer(),
+        asr=FailingAsr(),
+        audio=FakeAudio(),
+        speaker_cache=SpeakerCache(tmp_path / "speaker-cache.json"),
+        embedding_extractor=TwoEmbeddings(),
+    )
+    workspace = LabelingWorkspace(pipeline, ArtifactStore(tmp_path / "jobs"))
+    job_id = workspace.diarize(_audio_file(tmp_path)).job_id
+    workspace.set_speaker_excluded(job_id, "SPEAKER_01", True)
+
+    out = workspace.write_diarization_json(job_id, tmp_path / "diarization.json", {})
+    data = json.loads(out.read_text())
+
+    # Sorted by start then speaker, and the excluded speaker's turns dropped
+    # entirely rather than merely left unlabeled.
+    assert data["turns"] == [
+        {"speaker": "SPEAKER_00", "start": 0.0, "end": 2.0},
+        {"speaker": "SPEAKER_00", "start": 5.0, "end": 5.5},
+    ]
+
+
 def test_finished_job_keeps_only_the_transcript(tmp_path: Path) -> None:
     """Working audio is ~99% of a job and is rebuildable; the transcript is not.
 

@@ -134,10 +134,19 @@ class ArtifactStore:
     def _note_path(self, job_id: str) -> Path:
         return self.root / job_id / "note.json"
 
-    def find_by_fingerprint(self, fingerprint: str) -> tuple[str, PipelineArtifacts] | None:
-        """Newest job whose source audio hashed to ``fingerprint``, if any."""
+    def find_by_fingerprint(
+        self, fingerprint: str, *, require_transcribed: bool = False
+    ) -> tuple[str, PipelineArtifacts] | None:
+        """Newest job whose source audio hashed to ``fingerprint``, if any.
+
+        ``require_transcribed=True`` only matches a job that actually has a
+        transcript - the `transcribe`/`run` callers need this, so a diarize-only
+        job for the same audio never comes back in place of a real transcription.
+        `agent diarize` leaves it False: any job with that fingerprint already
+        has diarization, transcribed or not, and either is reusable there.
+        """
         for job_id, artifacts in self.list_jobs():
-            if artifacts.source_fingerprint == fingerprint:
+            if artifacts.source_fingerprint == fingerprint and (not require_transcribed or artifacts.transcribed):
                 return job_id, artifacts
         return None
 

@@ -118,14 +118,57 @@ class LabelingWorkspace:
         ASR and diarization over a meeting cost minutes, and re-running them
         produces the same segments; a job whose source hashed the same is
         returned as-is. Pass ``force=True`` to transcribe regardless.
+
+        Never reuses a diarize-only job for the same audio: that job has no
+        transcript, and handing one back here would make `transcribe` return
+        a job with no text in it.
         """
+        return self._transcribe_or_diarize(
+            audio_path,
+            transcribe=True,
+            progress=progress,
+            force=force,
+            single_speaker_channels=single_speaker_channels,
+        )
+
+    def diarize(
+        self,
+        audio_path: Path,
+        *,
+        progress: ProgressCallback | None = None,
+        force: bool = False,
+        single_speaker_channels: frozenset[str] = frozenset(),
+    ) -> JobSummary:
+        """Diarize ``audio_path`` without running ASR, reusing an existing job for
+        identical audio.
+
+        Unlike `transcribe`, this reuses *any* job for the same audio, full or
+        diarize-only - both already hold diarization, which is all this needs.
+        """
+        return self._transcribe_or_diarize(
+            audio_path,
+            transcribe=False,
+            progress=progress,
+            force=force,
+            single_speaker_channels=single_speaker_channels,
+        )
+
+    def _transcribe_or_diarize(
+        self,
+        audio_path: Path,
+        *,
+        transcribe: bool,
+        progress: ProgressCallback | None,
+        force: bool,
+        single_speaker_channels: frozenset[str],
+    ) -> JobSummary:
         source = Path(audio_path).expanduser()
         if not source.is_file():
             raise ValueError(f"audio file not found: {source}")
 
         fingerprint = fingerprint_file(source)
         if not force:
-            existing = self.store.find_by_fingerprint(fingerprint)
+            existing = self.store.find_by_fingerprint(fingerprint, require_transcribed=transcribe)
             if existing is not None:
                 job_id, artifacts = existing
                 if progress is not None:
@@ -139,6 +182,7 @@ class LabelingWorkspace:
             job_id=job_id,
             progress=progress,
             single_speaker_channels=single_speaker_channels,
+            transcribe=transcribe,
         )
         artifacts = artifacts.model_copy(update={"source_fingerprint": fingerprint})
         self.store.save(job_id, artifacts)
@@ -485,26 +529,7 @@ class LabelingWorkspace:
         workspace has no notion of that directory, so the agent flow supplies it.
         """
         artifacts = self._load(job_id)
-        speakers = []
-        for row in self._speaker_rows(artifacts):
-            if row.assigned_label is not None:
-                label, label_source = row.assigned_label, "named"
-            elif row.suggested_label is not None:
-                label, label_source = row.suggested_label, "suggestion"
-            else:
-                label, label_source = None, None
-            speakers.append(
-                {
-                    "id": row.speaker,
-                    "label": label,
-                    "label_source": label_source,
-                    "suggested_label": row.suggested_label,
-                    "suggestion_score": round(row.suggestion_score, 2) if row.suggested_label is not None else None,
-                    "sample_file": sample_files.get(row.speaker),
-                    "talk_seconds": row.talk_seconds,
-                    "excluded": row.excluded,
-                }
-            )
+        speakers = self._speaker_entries(artifacts, sample_files)
 
         excluded_speakers = set(artifacts.excluded_speakers)
         excluded_lines = {line_key(*k) for k in artifacts.excluded_lines}
@@ -538,6 +563,68 @@ class LabelingWorkspace:
         temp_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
         temp_path.replace(out)
         return out.resolve()
+
+    def write_diarization_json(
+        self, job_id: str, output_path: Path, sample_files: dict[str, str | None]
+    ) -> Path:
+        """Write diarization.json: speakers (same shape as transcript.json) and speaker turns.
+
+        The diarize-only counterpart to ``write_transcript_json`` - no ASR ever ran,
+        so there is no transcript text or word timing, only who spoke when.
+        ``sample_files`` is the same per-directory mapping ``write_transcript_json``
+        takes.
+        """
+        artifacts = self._load(job_id)
+        speakers = self._speaker_entries(artifacts, sample_files)
+
+        excluded_speakers = set(artifacts.excluded_speakers)
+        turns = [
+            {"speaker": segment.speaker, "start": round(segment.start, 3), "end": round(segment.end, 3)}
+            for segment in sorted(artifacts.diarization, key=lambda s: (s.start, s.speaker))
+            if segment.speaker not in excluded_speakers
+        ]
+
+        payload = {
+            "version": 1,
+            "job_id": job_id,
+            "source": str(artifacts.source_path),
+            "duration_seconds": round(artifacts.result.duration_seconds, 3),
+            "speakers": speakers,
+            "turns": turns,
+        }
+
+        out = Path(output_path).expanduser()
+        out.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = out.with_suffix(".json.tmp")
+        temp_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        temp_path.replace(out)
+        return out.resolve()
+
+    def _speaker_entries(
+        self, artifacts: PipelineArtifacts, sample_files: dict[str, str | None]
+    ) -> list[dict]:
+        """The per-speaker objects transcript.json and diarization.json both emit."""
+        entries = []
+        for row in self._speaker_rows(artifacts):
+            if row.assigned_label is not None:
+                label, label_source = row.assigned_label, "named"
+            elif row.suggested_label is not None:
+                label, label_source = row.suggested_label, "suggestion"
+            else:
+                label, label_source = None, None
+            entries.append(
+                {
+                    "id": row.speaker,
+                    "label": label,
+                    "label_source": label_source,
+                    "suggested_label": row.suggested_label,
+                    "suggestion_score": round(row.suggestion_score, 2) if row.suggested_label is not None else None,
+                    "sample_file": sample_files.get(row.speaker),
+                    "talk_seconds": row.talk_seconds,
+                    "excluded": row.excluded,
+                }
+            )
+        return entries
 
     def transcript_text(self, job_id: str) -> str:
         header, body = self._transcript_parts(job_id)

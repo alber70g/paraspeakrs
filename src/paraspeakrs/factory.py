@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import sys
 
-from .asr import MockAsr, OpenAICompatibleParakeetAsr, SherpaParakeetAsr
+from .asr import MockAsr, NullAsr, OpenAICompatibleParakeetAsr, SherpaParakeetAsr
 from .audio import AudioPreparer
 from .cache import SpeakerCache, embedding_namespace
 from .config import Settings, sherpa_model_name
@@ -93,28 +93,36 @@ def _settle_precision(settings: Settings) -> Settings:
     )
 
 
-def build_pipeline(settings: Settings) -> TranscriptionPipeline:
-    # Fetch before validating: validate_runtime() rejects a missing model dir, and
-    # for an installed tool "missing" is simply the state of a first run.
-    if settings.asr_backend == "sherpa" and settings.sherpa_model_dir is not None:
-        settings = _use_downloaded_model(settings)
-        settings = _settle_precision(settings)
-        ensure_sherpa_model(settings.sherpa_model_dir, settings.sherpa_precision)
-    settings.validate_runtime()
-    if settings.asr_backend == "sherpa":
-        assert settings.sherpa_model_dir is not None
-        asr = SherpaParakeetAsr(settings.sherpa_model_dir, settings.device, settings.sherpa_num_threads)
-    elif settings.asr_backend == "openai":
-        assert settings.openai_base_url is not None
-        asr = OpenAICompatibleParakeetAsr(
-            settings.openai_base_url,
-            settings.openai_api_key,
-            settings.openai_model,
-        )
+def build_pipeline(settings: Settings, *, need_asr: bool = True) -> TranscriptionPipeline:
+    """``need_asr=False`` builds a pipeline that can diarize but must never
+    transcribe: no ASR model is resolved, downloaded or validated, and the
+    precision question is never asked. Used for `agent diarize`, which has to
+    work with no ASR model installed and stdin closed."""
+    if need_asr:
+        # Fetch before validating: validate_runtime() rejects a missing model dir, and
+        # for an installed tool "missing" is simply the state of a first run.
+        if settings.asr_backend == "sherpa" and settings.sherpa_model_dir is not None:
+            settings = _use_downloaded_model(settings)
+            settings = _settle_precision(settings)
+            ensure_sherpa_model(settings.sherpa_model_dir, settings.sherpa_precision)
+        settings.validate_runtime()
+        if settings.asr_backend == "sherpa":
+            assert settings.sherpa_model_dir is not None
+            asr = SherpaParakeetAsr(settings.sherpa_model_dir, settings.device, settings.sherpa_num_threads)
+        elif settings.asr_backend == "openai":
+            assert settings.openai_base_url is not None
+            asr = OpenAICompatibleParakeetAsr(
+                settings.openai_base_url,
+                settings.openai_api_key,
+                settings.openai_model,
+            )
+        else:
+            asr = MockAsr()
+        # stderr: over stdio MCP, stdout is the protocol channel.
+        print(f"ASR model: {describe_asr(asr)}", file=sys.stderr)
     else:
-        asr = MockAsr()
-    # stderr: over stdio MCP, stdout is the protocol channel.
-    print(f"ASR model: {describe_asr(asr)}", file=sys.stderr)
+        settings.validate_runtime(require_asr=False)
+        asr = NullAsr()
 
     audio = AudioPreparer()
     if settings.diar_backend == "speakrs":

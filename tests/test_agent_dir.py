@@ -46,18 +46,25 @@ class Asr:
         return AsrSegment(text=" ".join(w for w, _ in said), start=0.0, end=12.0, words=words)
 
 
+class FailingAsr:
+    """`agent diarize` must never reach the ASR engine."""
+
+    def transcribe(self, audio_path):
+        raise AssertionError("ASR must not run for `agent diarize`")
+
+
 class Embeddings:
     def extract(self, audio_path, diarization):
         return EMBEDDINGS
 
 
-def _workspace(tmp_path: Path) -> LabelingWorkspace:
+def _workspace(tmp_path: Path, asr=None) -> LabelingWorkspace:
     cache = SpeakerCache(tmp_path / "speaker-cache.json")
     # A voice the library already knows, so SPEAKER_01 arrives with a suggestion.
     cache.fold("Alice", EMBEDDINGS["SPEAKER_01"], job_id="earlier", speaker_id="SPEAKER_03")
     pipeline = TranscriptionPipeline(
         diarizer=ThreeSpeakers(),
-        asr=Asr(),
+        asr=asr or Asr(),
         audio=Audio(),
         speaker_cache=cache,
         embedding_extractor=Embeddings(),
@@ -72,6 +79,17 @@ def prepared(tmp_path):
     source.write_bytes(b"")
     out = tmp_path / "out"
     result = agent_dir.prepare(workspace, source, out)
+    return workspace, out, result
+
+
+@pytest.fixture
+def diarized(tmp_path):
+    # A FailingAsr workspace: `agent diarize` reaching it would fail the test.
+    workspace = _workspace(tmp_path, asr=FailingAsr())
+    source = tmp_path / "meeting.m4a"
+    source.write_bytes(b"")
+    out = tmp_path / "out"
+    result = agent_dir.diarize(workspace, source, out)
     return workspace, out, result
 
 
@@ -325,6 +343,69 @@ def test_dry_run_does_not_touch_transcript_json(prepared):
 
     # A dry run reports what would change; it must not rewrite any output file.
     assert (out / "transcript.json").read_text() == before
+
+
+def _diarization_json(out: Path) -> dict:
+    return json.loads((out / "diarization.json").read_text())
+
+
+def test_diarize_writes_samples_and_diarization_json_with_no_asr(diarized):
+    _, out, result = diarized
+
+    assert sorted(p.name for p in out.iterdir()) == [
+        "NEXT_STEPS.md",
+        "SPEAKER_00__NAME-ME.wav",
+        "SPEAKER_01__Alice_1.00.wav",
+        "SPEAKER_02__NAME-ME.wav",
+        "diarization.json",
+        "manifest.json",
+    ]
+    assert result["diarization"] == str(out / "diarization.json")
+    assert "transcript" not in result
+
+    assert json.loads((out / "manifest.json").read_text())["kind"] == "diarization"
+
+    data = _diarization_json(out)
+    assert data["version"] == 1
+    assert data["job_id"] == result["job_id"]
+    assert data["source"] == str(out.parent / "meeting.m4a")
+    assert data["duration_seconds"] == 5.0
+    # ThreeSpeakers diarizes 00/01/02 back to back - already in order.
+    assert data["turns"] == [
+        {"speaker": "SPEAKER_00", "start": 0.0, "end": 4.0},
+        {"speaker": "SPEAKER_01", "start": 4.0, "end": 8.0},
+        {"speaker": "SPEAKER_02", "start": 8.0, "end": 12.0},
+    ]
+    by_id = {s["id"]: s for s in data["speakers"]}
+    assert by_id["SPEAKER_01"]["label"] == "Alice"
+    assert by_id["SPEAKER_01"]["label_source"] == "suggestion"
+    assert by_id["SPEAKER_01"]["sample_file"] == "SPEAKER_01__Alice_1.00.wav"
+
+
+def test_diarize_apply_names_a_speaker_and_drops_an_excluded_ones_turns(diarized):
+    workspace, out, _ = diarized
+    _rename(out, "SPEAKER_00__NAME-ME.wav", "SPEAKER_00__Bob.wav")
+    (out / "SPEAKER_02__NAME-ME.wav").unlink()
+
+    result = agent_dir.apply(workspace, out)
+
+    assert result["diarization"] == str(out / "diarization.json")
+    assert "transcript" not in result
+    assert "lines" not in result
+    # apply must not have written a transcript for a diarize-only directory.
+    assert not (out / "transcript.txt").exists()
+    assert not (out / "transcript.json").exists()
+
+    data = _diarization_json(out)
+    by_id = {s["id"]: s for s in data["speakers"]}
+    assert by_id["SPEAKER_00"]["label"] == "Bob"
+    assert by_id["SPEAKER_00"]["label_source"] == "named"
+    assert by_id["SPEAKER_00"]["sample_file"] == "SPEAKER_00__Bob.wav"
+    assert by_id["SPEAKER_02"]["excluded"] is True
+    assert by_id["SPEAKER_02"]["sample_file"] is None
+
+    # The dropped speaker's turns are gone, not merely unlabeled.
+    assert {t["speaker"] for t in data["turns"]} == {"SPEAKER_00", "SPEAKER_01"}
 
 
 def test_unattributed_segments_have_a_null_speaker(tmp_path):

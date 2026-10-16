@@ -67,9 +67,15 @@ class TranscriptionPipeline:
         job_id: str | None = None,
         progress: ProgressCallback | None = None,
         single_speaker_channels: frozenset[str] = frozenset(),
+        transcribe: bool = True,
     ) -> PipelineArtifacts:
         """`single_speaker_channels` names stereo channels ("L", "R") known to
-        carry one person each; see :func:`collapse_channels`."""
+        carry one person each; see :func:`collapse_channels`.
+
+        `transcribe=False` runs diarization, embeddings and speaker-label
+        resolution but never touches the ASR engine: no chunk is ever built or
+        sent to it, and `result.segments` comes back empty. Used by `agent
+        diarize`, which must work without the ASR model installed."""
         job_id = job_id or str(uuid4())
         _report(progress, "materialize", "copying uploaded audio into workspace", 5)
         raw = self.audio.materialize(
@@ -100,9 +106,12 @@ class TranscriptionPipeline:
         _report(progress, "embeddings", "extracting speaker embeddings", 45)
         speaker_embeddings = self.embedding_extractor.extract(diar_audio, diarization)
         diarization, speaker_embeddings = collapse_channels(diarization, speaker_embeddings, single_speaker_channels)
-        asr_segments = self._transcribe_chunks(work_dir, normalized, diarization, duration, progress)
-        _report(progress, "merge", "merging ASR text with diarization", 90)
-        merged, warnings = merge_asr_with_diarization(asr_segments, diarization)
+        if transcribe:
+            asr_segments = self._transcribe_chunks(work_dir, normalized, diarization, duration, progress)
+            _report(progress, "merge", "merging ASR text with diarization", 90)
+            merged, warnings = merge_asr_with_diarization(asr_segments, diarization)
+        else:
+            merged, warnings = [], []
         _report(progress, "speaker-cache", "resolving speaker labels from cache", 95)
         labels = self.speaker_cache.resolve_embeddings(speaker_embeddings)
         if not labels:
@@ -124,6 +133,7 @@ class TranscriptionPipeline:
             speaker_embeddings=speaker_embeddings,
             normalized_audio_path=normalized,
             source_path=file_path,
+            transcribed=transcribe,
         )
 
     def prepare_labeling(

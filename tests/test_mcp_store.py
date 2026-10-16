@@ -69,6 +69,39 @@ def test_clearing_a_note_removes_the_file_rather_than_storing_blank(tmp_path):
     assert not (store.root / "job-1" / "note.json").exists()
 
 
+def test_find_by_fingerprint_matches_any_job_by_default(tmp_path):
+    store = ArtifactStore(tmp_path)
+    store.work_dir("diar-only")
+    store.save(
+        "diar-only",
+        _artifacts("diar-only").model_copy(update={"source_fingerprint": "abc", "transcribed": False}),
+    )
+
+    found = store.find_by_fingerprint("abc")
+
+    assert found is not None and found[0] == "diar-only"
+
+
+def test_find_by_fingerprint_with_require_transcribed_skips_diarize_only_jobs(tmp_path):
+    store = ArtifactStore(tmp_path)
+    store.work_dir("diar-only")
+    store.save(
+        "diar-only",
+        _artifacts("diar-only").model_copy(update={"source_fingerprint": "abc", "transcribed": False}),
+    )
+
+    assert store.find_by_fingerprint("abc", require_transcribed=True) is None
+
+    store.work_dir("full")
+    store.save(
+        "full",
+        _artifacts("full").model_copy(update={"source_fingerprint": "abc", "transcribed": True}),
+    )
+
+    found = store.find_by_fingerprint("abc", require_transcribed=True)
+    assert found is not None and found[0] == "full"
+
+
 def test_an_unreadable_note_costs_the_note_not_the_job(tmp_path):
     """artifacts.json is the expensive, irreplaceable half of a job; a corrupt
     note must never be a reason the job cannot be opened."""

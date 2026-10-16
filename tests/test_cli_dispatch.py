@@ -83,6 +83,7 @@ def test_agent_help_prints_the_packaged_guide(monkeypatch, capsys):
     ("argv", "expected"),
     [
         (["agent", "transcribe", "m.m4a", "-o", "out"], ("prepare", "m.m4a", "out")),
+        (["agent", "diarize", "m.m4a", "-o", "out"], ("diarize", "m.m4a", "out")),
         (["agent", "apply", "out", "--dry-run"], ("apply", "out", True)),
     ],
 )
@@ -91,8 +92,9 @@ def test_agent_commands_reach_the_directory_flow(monkeypatch, capsys, argv, expe
 
     from paraspeakrs import agent_dir
 
-    monkeypatch.setattr(cli, "build_pipeline", lambda settings: None)
+    monkeypatch.setattr(cli, "build_pipeline", lambda settings, need_asr=True: None)
     monkeypatch.setattr(agent_dir, "prepare", lambda ws, audio, out: {"call": ["prepare", str(audio), str(out)]})
+    monkeypatch.setattr(agent_dir, "diarize", lambda ws, audio, out: {"call": ["diarize", str(audio), str(out)]})
     monkeypatch.setattr(agent_dir, "apply", lambda ws, out, dry_run: {"call": ["apply", str(out), dry_run]})
     monkeypatch.setattr(cli.sys, "argv", ["paraspeakrs", *argv])
 
@@ -100,3 +102,17 @@ def test_agent_commands_reach_the_directory_flow(monkeypatch, capsys, argv, expe
 
     # stdout is pure JSON, so an agent can parse it without scraping.
     assert tuple(json.loads(capsys.readouterr().out)["call"]) == expected
+
+
+def test_agent_diarize_never_asks_build_pipeline_for_asr(monkeypatch):
+    """`agent diarize` must not load, download or ask about the ASR model."""
+    seen: list[bool] = []
+    monkeypatch.setattr(cli, "build_pipeline", lambda settings, need_asr=True: (seen.append(need_asr), None)[1])
+    from paraspeakrs import agent_dir
+
+    monkeypatch.setattr(agent_dir, "diarize", lambda ws, audio, out: {"call": []})
+    monkeypatch.setattr(cli.sys, "argv", ["paraspeakrs", "agent", "diarize", "m.m4a", "-o", "out"])
+
+    cli._main()
+
+    assert seen == [False]

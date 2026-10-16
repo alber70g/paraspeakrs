@@ -1,8 +1,10 @@
 """File-based speaker naming for coding agents: the directory is the interface.
 
-``prepare`` transcribes into a directory with one sample per speaker, named
-``<SPEAKER_ID>__NAME-ME.wav``. The user renames (or deletes) those files, and
-``apply`` reads the directory back into the job and rewrites the transcript.
+``prepare`` transcribes, and ``diarize`` diarizes without running ASR, into a
+directory with one sample per speaker, named ``<SPEAKER_ID>__NAME-ME.wav``. The
+user renames (or deletes) those files, and ``apply`` reads the directory back
+into the job and rewrites the transcript (or, for a ``diarize`` directory, the
+diarization) to match.
 
 Apply states the whole directory every time rather than diffing, so it can run
 again after any further rename. The job in the shared store stays the source of
@@ -16,12 +18,13 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from .labeling import LabelingWorkspace, SpeakerRow
+from .labeling import JobSummary, LabelingWorkspace, SpeakerRow
 from .transcript_txt import format_time
 
 MANIFEST = "manifest.json"
 TRANSCRIPT = "transcript.txt"
 TRANSCRIPT_JSON = "transcript.json"
+DIARIZATION_JSON = "diarization.json"
 NEXT_STEPS = "NEXT_STEPS.md"
 UNNAMED = "NAME-ME"
 SEP = "__"
@@ -41,10 +44,49 @@ class Decision:
 
 
 def prepare(workspace: LabelingWorkspace, audio_path: Path, out_dir: Path) -> dict:
+    """Transcribe into ``out_dir``: samples, ``transcript.txt``/``transcript.json`` and NEXT_STEPS.md."""
+    out_dir = _check_out_dir(out_dir)
+    summary = workspace.transcribe(Path(audio_path))
+    files, report = _stage(workspace, summary, out_dir, kind="transcript")
+    sample_files = {row.speaker: files[row.speaker].name if row.speaker in files else None for row in summary.speakers}
+    workspace.write_transcript(summary.job_id, out_dir / TRANSCRIPT)
+    workspace.write_transcript_json(summary.job_id, out_dir / TRANSCRIPT_JSON, sample_files)
+    report["transcript"] = str(out_dir / TRANSCRIPT)
+    return report
+
+
+def diarize(workspace: LabelingWorkspace, audio_path: Path, out_dir: Path) -> dict:
+    """Diarize into ``out_dir``, without ASR: samples, ``diarization.json`` and NEXT_STEPS.md.
+
+    No transcript is produced - this is for a caller (MacParakeet) that does its
+    own speech recognition and only wants speaker turns, name suggestions and
+    per-speaker samples from paraspeakrs.
+    """
+    out_dir = _check_out_dir(out_dir)
+    summary = workspace.diarize(Path(audio_path))
+    files, report = _stage(workspace, summary, out_dir, kind="diarization")
+    sample_files = {row.speaker: files[row.speaker].name if row.speaker in files else None for row in summary.speakers}
+    workspace.write_diarization_json(summary.job_id, out_dir / DIARIZATION_JSON, sample_files)
+    report["diarization"] = str(out_dir / DIARIZATION_JSON)
+    return report
+
+
+def _check_out_dir(out_dir: Path) -> Path:
     out_dir = Path(out_dir).expanduser().resolve()
     if out_dir.exists() and any(out_dir.iterdir()):
         raise ValueError(f"output directory {out_dir} is not empty - pick a new one, or run `agent apply` on it")
-    summary = workspace.transcribe(Path(audio_path))
+    return out_dir
+
+
+def _stage(workspace: LabelingWorkspace, summary: JobSummary, out_dir: Path, *, kind: str) -> tuple[dict, dict]:
+    """Write manifest.json, speaker sample montages and NEXT_STEPS.md - shared by
+    ``prepare`` and ``diarize``, which differ only in the transcript/diarization
+    file they write afterward and the report key that names it.
+
+    Returns (files, report): ``files`` so the caller can build the same
+    ``sample_files`` mapping its own output file needs, ``report`` as the common
+    part of the JSON report, left for the caller to add its own output key to.
+    """
     job_id = summary.job_id
     hints = _hints(workspace, job_id)
 
@@ -56,11 +98,11 @@ def prepare(workspace: LabelingWorkspace, audio_path: Path, out_dir: Path) -> di
             files[row.speaker] = out_dir / f"{row.speaker}{SEP}{_initial_name(row, suggestion)}.wav"
     workspace.speaker_montages(job_id, files)
 
-    manifest = {"version": 1, "job_id": job_id, "source": str(summary.source_path), "speakers": speakers}
+    manifest: dict = {"version": 1, "job_id": job_id, "source": str(summary.source_path), "speakers": speakers}
+    if kind != "transcript":
+        manifest["kind"] = kind
     (out_dir / MANIFEST).write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    workspace.write_transcript(job_id, out_dir / TRANSCRIPT)
-    sample_files = {row.speaker: files[row.speaker].name if row.speaker in files else None for row in summary.speakers}
-    workspace.write_transcript_json(job_id, out_dir / TRANSCRIPT_JSON, sample_files)
+
     rows = [
         {
             "speaker": row.speaker,
@@ -74,26 +116,31 @@ def prepare(workspace: LabelingWorkspace, audio_path: Path, out_dir: Path) -> di
         if row.speaker in files
     ]
     (out_dir / NEXT_STEPS).write_text(_next_steps(out_dir, rows), encoding="utf-8")
-    return {
+    report = {
         "out_dir": str(out_dir),
         "job_id": job_id,
         "reused": summary.reused,
-        "transcript": str(out_dir / TRANSCRIPT),
         "speakers": rows,
         "next": f"Ask the user to rename the samples in {out_dir} (see {NEXT_STEPS}), "
         f"then run: paraspeakrs agent apply {out_dir}",
     }
+    return files, report
 
 
 def apply(workspace: LabelingWorkspace, out_dir: Path, *, dry_run: bool = False) -> dict:
     out_dir = Path(out_dir).expanduser().resolve()
     manifest_path = out_dir / MANIFEST
     if not manifest_path.is_file():
-        raise ValueError(f"{out_dir} has no {MANIFEST} - was it made by `paraspeakrs agent transcribe`?")
+        raise ValueError(
+            f"{out_dir} has no {MANIFEST} - was it made by "
+            "`paraspeakrs agent transcribe` or `paraspeakrs agent diarize`?"
+        )
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     job_id = manifest["job_id"]
+    kind = manifest.get("kind", "transcript")
     decisions = plan(out_dir, manifest["speakers"])
 
+    lines = None
     if not dry_run:
         current = {row.speaker: row.assigned_label for row in workspace.speaker_rows(job_id)}
         for d in decisions:
@@ -102,8 +149,12 @@ def apply(workspace: LabelingWorkspace, out_dir: Path, *, dry_run: bool = False)
             if d.name is not None:
                 workspace.label_speaker(job_id, d.speaker, d.name, teach=d.teach)
             workspace.set_speaker_excluded(job_id, d.speaker, d.action == "dropped")
-        _, lines = workspace.write_transcript(job_id, out_dir / TRANSCRIPT)
-        workspace.write_transcript_json(job_id, out_dir / TRANSCRIPT_JSON, _sample_files(out_dir, manifest["speakers"]))
+        sample_files = _sample_files(out_dir, manifest["speakers"])
+        if kind == "diarization":
+            workspace.write_diarization_json(job_id, out_dir / DIARIZATION_JSON, sample_files)
+        else:
+            _, lines = workspace.write_transcript(job_id, out_dir / TRANSCRIPT)
+            workspace.write_transcript_json(job_id, out_dir / TRANSCRIPT_JSON, sample_files)
 
     by_name: dict[str, list[str]] = {}
     for d in decisions:
@@ -112,11 +163,14 @@ def apply(workspace: LabelingWorkspace, out_dir: Path, *, dry_run: bool = False)
     result = {
         "dry_run": dry_run,
         "job_id": job_id,
-        "transcript": str(out_dir / TRANSCRIPT),
         "speakers": [{"speaker": d.speaker, "action": d.action, "name": d.name} for d in decisions],
         "merged": {name: ids for name, ids in by_name.items() if len(ids) > 1},
     }
-    if not dry_run:
+    if kind == "diarization":
+        result["diarization"] = str(out_dir / DIARIZATION_JSON)
+    else:
+        result["transcript"] = str(out_dir / TRANSCRIPT)
+    if lines is not None:
         result["lines"] = lines
     return result
 

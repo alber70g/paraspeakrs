@@ -218,10 +218,13 @@ class Settings:
             openai_model=os.getenv("PARAKEET_OPENAI_MODEL", cls.openai_model),
         )
 
-    def validate_runtime(self) -> None:
+    def validate_runtime(self, *, require_asr: bool = True) -> None:
+        """``require_asr=False`` skips the ASR checks - diarize-only callers
+        never load an ASR engine, so an absent or undownloaded model must not
+        block them."""
         if self.device not in ("cpu", "cuda", "coreml"):
             raise ValueError("device must be 'cpu', 'cuda', or 'coreml'")
-        if self.asr_backend == "sherpa":
+        if require_asr and self.asr_backend == "sherpa":
             if self.sherpa_model_dir is None:
                 raise ValueError("sherpa_model_dir is required for sherpa ASR")
             if not self.sherpa_model_dir.is_dir():
@@ -232,7 +235,7 @@ class Settings:
                     "(PARAKEET_MODEL_URL, PARAKEET_SHERPA_MODEL_DIR, "
                     "or PARAKEET_ASR_BACKEND=openai)."
                 )
-        if self.asr_backend == "openai" and not self.openai_base_url:
+        if require_asr and self.asr_backend == "openai" and not self.openai_base_url:
             raise ValueError("openai_base_url is required for OpenAI-compatible ASR")
         if self.diar_backend == "speakrs":
             if not self.speakrs_bin.is_file():

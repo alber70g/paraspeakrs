@@ -83,6 +83,19 @@ class OpenAICompatibleParakeetAsr:
         return AsrSegment(text=text, start=0.0, end=0.0, words=[])
 
 
+class NullAsr:
+    """Stands in for an ASR backend when the pipeline only needs to diarize.
+
+    `transcribe` must never actually be called on this: a diarize-only pipeline
+    run never reaches `_transcribe_chunks`. Raising here, rather than returning
+    an empty result, turns a regression that calls it anyway into a loud
+    failure instead of a silently empty transcript.
+    """
+
+    def transcribe(self, audio_path: Path) -> AsrSegment:
+        raise RuntimeError("NullAsr.transcribe() was called - a diarize-only run must never invoke ASR")
+
+
 class MockAsr:
     def __init__(self, text: str = "mock transcript") -> None:
         self.text = text

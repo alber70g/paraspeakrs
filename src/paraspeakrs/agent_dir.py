@@ -21,6 +21,7 @@ from .transcript_txt import format_time
 
 MANIFEST = "manifest.json"
 TRANSCRIPT = "transcript.txt"
+TRANSCRIPT_JSON = "transcript.json"
 NEXT_STEPS = "NEXT_STEPS.md"
 UNNAMED = "NAME-ME"
 SEP = "__"
@@ -58,6 +59,8 @@ def prepare(workspace: LabelingWorkspace, audio_path: Path, out_dir: Path) -> di
     manifest = {"version": 1, "job_id": job_id, "source": str(summary.source_path), "speakers": speakers}
     (out_dir / MANIFEST).write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     workspace.write_transcript(job_id, out_dir / TRANSCRIPT)
+    sample_files = {row.speaker: files[row.speaker].name if row.speaker in files else None for row in summary.speakers}
+    workspace.write_transcript_json(job_id, out_dir / TRANSCRIPT_JSON, sample_files)
     rows = [
         {
             "speaker": row.speaker,
@@ -100,6 +103,7 @@ def apply(workspace: LabelingWorkspace, out_dir: Path, *, dry_run: bool = False)
                 workspace.label_speaker(job_id, d.speaker, d.name, teach=d.teach)
             workspace.set_speaker_excluded(job_id, d.speaker, d.action == "dropped")
         _, lines = workspace.write_transcript(job_id, out_dir / TRANSCRIPT)
+        workspace.write_transcript_json(job_id, out_dir / TRANSCRIPT_JSON, _sample_files(out_dir, manifest["speakers"]))
 
     by_name: dict[str, list[str]] = {}
     for d in decisions:
@@ -150,6 +154,21 @@ def plan(out_dir: Path, speakers: dict[str, dict]) -> list[Decision]:
         else:
             decisions.append(Decision(speaker, "named", rest))
     return decisions
+
+
+def _sample_files(out_dir: Path, speakers: dict[str, dict]) -> dict[str, str]:
+    """Each speaker's current sample filename on disk, by the ID-prefix match plan() uses.
+
+    Called after plan() has already validated the directory (or apply would have
+    aborted before reaching this), so every match here is unambiguous.
+    """
+    ids = sorted(speakers, key=len, reverse=True)
+    files = {}
+    for path in sorted(out_dir.glob("*.wav")):
+        speaker = next((s for s in ids if path.stem.startswith(s + SEP)), None)
+        if speaker is not None:
+            files[speaker] = path.name
+    return files
 
 
 def _suggestion(row: SpeakerRow) -> str | None:

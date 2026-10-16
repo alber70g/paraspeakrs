@@ -5,7 +5,7 @@ import re
 import time
 from collections import deque
 from collections.abc import Collection, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from .models import TranscriptionResult, TranscriptSegment, Word
 
@@ -20,6 +20,10 @@ class Utterance:
     speaker: str
     resolved_label: str | None
     text: str
+    # The underlying ASR words this line was split from, for consumers that need
+    # word-level timing (transcript.json). Empty when the segment it came from
+    # had no word timestamps, same as the text-only fallback split.
+    words: list[Word] = field(default_factory=list)
 
     @property
     def key(self) -> tuple[str, float]:
@@ -170,6 +174,7 @@ def _phrase_to_utterance(words: list[Word], segment: TranscriptSegment) -> Utter
         speaker=segment.speaker,
         resolved_label=segment.resolved_label,
         text=text,
+        words=words,
     )
 
 

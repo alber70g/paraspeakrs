@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -471,6 +472,72 @@ class LabelingWorkspace:
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(header + body, encoding="utf-8")
         return out.resolve(), body.count("\n")
+
+    def write_transcript_json(
+        self, job_id: str, output_path: Path, sample_files: dict[str, str | None]
+    ) -> Path:
+        """Write transcript.json: speakers with their labels, and word-level segments.
+
+        Segments are filtered the same way ``write_transcript`` filters transcript.txt
+        - excluded speakers and excluded lines dropped, everything else in time order.
+        ``sample_files`` maps each speaker ID to the sample ``.wav`` currently on disk
+        for it (relative to the output directory), or None when it has none; the
+        workspace has no notion of that directory, so the agent flow supplies it.
+        """
+        artifacts = self._load(job_id)
+        speakers = []
+        for row in self._speaker_rows(artifacts):
+            if row.assigned_label is not None:
+                label, label_source = row.assigned_label, "named"
+            elif row.suggested_label is not None:
+                label, label_source = row.suggested_label, "suggestion"
+            else:
+                label, label_source = None, None
+            speakers.append(
+                {
+                    "id": row.speaker,
+                    "label": label,
+                    "label_source": label_source,
+                    "suggested_label": row.suggested_label,
+                    "suggestion_score": round(row.suggestion_score, 2) if row.suggested_label is not None else None,
+                    "sample_file": sample_files.get(row.speaker),
+                    "talk_seconds": row.talk_seconds,
+                    "excluded": row.excluded,
+                }
+            )
+
+        excluded_speakers = set(artifacts.excluded_speakers)
+        excluded_lines = {line_key(*k) for k in artifacts.excluded_lines}
+        segments = [
+            {
+                "speaker": None if utt.speaker == "UNKNOWN" else utt.speaker,
+                "start": round(utt.start, 3),
+                "end": round(utt.end, 3),
+                "text": utt.text,
+                "words": [
+                    {"word": w.word, "start": round(w.start, 3), "end": round(w.end, 3)} for w in utt.words
+                ],
+            }
+            for utt in utterances(apply_labels(artifacts.result, self._labels(artifacts)))
+            if utt.speaker not in excluded_speakers and utt.key not in excluded_lines
+        ]
+
+        payload = {
+            "version": 1,
+            "job_id": job_id,
+            "source": str(artifacts.source_path),
+            "language": artifacts.result.language,
+            "duration_seconds": round(artifacts.result.duration_seconds, 3),
+            "speakers": speakers,
+            "segments": segments,
+        }
+
+        out = Path(output_path).expanduser()
+        out.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = out.with_suffix(".json.tmp")
+        temp_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        temp_path.replace(out)
+        return out.resolve()
 
     def transcript_text(self, job_id: str) -> str:
         header, body = self._transcript_parts(job_id)

@@ -98,6 +98,7 @@ def test_prepare_writes_one_sample_per_speaker_and_suggests_known_voices(prepare
         "SPEAKER_01__Alice_1.00.wav",
         "SPEAKER_02__NAME-ME.wav",
         "manifest.json",
+        "transcript.json",
         "transcript.txt",
     ]
     # The agent gets text to reason from, not just audio it cannot hear.
@@ -224,3 +225,137 @@ def test_manifest_points_at_the_shared_job(prepared):
     job_id = json.loads((out / "manifest.json").read_text())["job_id"]
     assert job_id == result["job_id"]
     assert workspace.speaker_rows(job_id)[0].assigned_label == "Bob"
+
+
+def _transcript_json(out: Path) -> dict:
+    return json.loads((out / "transcript.json").read_text())
+
+
+def test_transcribe_writes_a_transcript_json_matching_the_schema(prepared):
+    """MacParakeet reads this file for word-level timings and speakers, so its
+    shape has to be exact, not just "parseable"."""
+    workspace, out, result = prepared
+    data = _transcript_json(out)
+
+    assert data["version"] == 1
+    assert data["job_id"] == result["job_id"]
+    assert data["source"] == str(out.parent / "meeting.m4a")
+    assert data["language"] is None
+    assert data["duration_seconds"] == 5.0
+
+    assert data["speakers"] == [
+        {
+            "id": "SPEAKER_00",
+            "label": None,
+            "label_source": None,
+            "suggested_label": None,
+            "suggestion_score": None,
+            "sample_file": "SPEAKER_00__NAME-ME.wav",
+            "talk_seconds": 4.0,
+            "excluded": False,
+        },
+        {
+            "id": "SPEAKER_01",
+            "label": "Alice",
+            "label_source": "suggestion",
+            "suggested_label": "Alice",
+            "suggestion_score": 1.0,
+            "sample_file": "SPEAKER_01__Alice_1.00.wav",
+            "talk_seconds": 4.0,
+            "excluded": False,
+        },
+        {
+            "id": "SPEAKER_02",
+            "label": None,
+            "label_source": None,
+            "suggested_label": None,
+            "suggestion_score": None,
+            "sample_file": "SPEAKER_02__NAME-ME.wav",
+            "talk_seconds": 4.0,
+            "excluded": False,
+        },
+    ]
+    # Unnamed/suggested speakers keep their raw ID as the segment speaker - the
+    # same ID the user renames files by, not a name nobody confirmed yet.
+    assert [s["speaker"] for s in data["segments"]] == ["SPEAKER_00", "SPEAKER_01", "SPEAKER_02"]
+    assert data["segments"][0] == {
+        "speaker": "SPEAKER_00",
+        "start": 0.5,
+        "end": 1.4,
+        "text": "Welcome everyone.",
+        "words": [
+            {"word": "Welcome", "start": 0.5, "end": 0.9},
+            {"word": "everyone.", "start": 1.0, "end": 1.4},
+        ],
+    }
+
+
+def test_apply_keeps_transcript_json_in_sync_with_the_directory(prepared):
+    """apply restates the whole directory every run; transcript.json must follow
+    the same renames and deletions as transcript.txt, not a stale snapshot from
+    `transcribe` time."""
+    workspace, out, _ = prepared
+    _rename(out, "SPEAKER_00__NAME-ME.wav", "SPEAKER_00__Bob.wav")
+    (out / "SPEAKER_02__NAME-ME.wav").unlink()
+
+    agent_dir.apply(workspace, out)
+    data = _transcript_json(out)
+
+    by_id = {s["id"]: s for s in data["speakers"]}
+    assert by_id["SPEAKER_00"]["label"] == "Bob"
+    assert by_id["SPEAKER_00"]["label_source"] == "named"
+    assert by_id["SPEAKER_00"]["sample_file"] == "SPEAKER_00__Bob.wav"
+    assert by_id["SPEAKER_00"]["excluded"] is False
+
+    # Deleting the sample drops the speaker from the transcript, not just the file.
+    assert by_id["SPEAKER_02"]["excluded"] is True
+    assert by_id["SPEAKER_02"]["sample_file"] is None
+    assert by_id["SPEAKER_02"]["label"] is None
+
+    speakers_in_segments = {s["speaker"] for s in data["segments"]}
+    assert speakers_in_segments == {"SPEAKER_00", "SPEAKER_01"}
+
+
+def test_dry_run_does_not_touch_transcript_json(prepared):
+    workspace, out, _ = prepared
+    before = (out / "transcript.json").read_text()
+    _rename(out, "SPEAKER_00__NAME-ME.wav", "SPEAKER_00__Bob.wav")
+
+    agent_dir.apply(workspace, out, dry_run=True)
+
+    # A dry run reports what would change; it must not rewrite any output file.
+    assert (out / "transcript.json").read_text() == before
+
+
+def test_unattributed_segments_have_a_null_speaker(tmp_path):
+    """A word diarization never covered (no speaker overlaps it at all) must
+    not surface as a fake speaker ID in the JSON - MacParakeet would otherwise
+    try to look up a speaker that was never offered for naming."""
+
+    class AsrWithUnattributedTail:
+        def transcribe(self, audio_path):
+            said = [("Welcome", 0.5), ("everyone.", 1.0), ("Thanks.", 5.0), ("Hello.", 9.0), ("Echo?", 20.0)]
+            words = [Word(word=w, start=t, end=t + 0.4) for w, t in said]
+            return AsrSegment(text=" ".join(w for w, _ in said), start=0.0, end=20.4, words=words)
+
+    cache = SpeakerCache(tmp_path / "speaker-cache.json")
+    pipeline = TranscriptionPipeline(
+        diarizer=ThreeSpeakers(),
+        asr=AsrWithUnattributedTail(),
+        audio=Audio(),
+        speaker_cache=cache,
+        embedding_extractor=Embeddings(),
+    )
+    workspace = LabelingWorkspace(pipeline, ArtifactStore(tmp_path / "jobs"))
+    source = tmp_path / "meeting.m4a"
+    source.write_bytes(b"")
+    out = tmp_path / "out"
+    agent_dir.prepare(workspace, source, out)
+
+    data = _transcript_json(out)
+
+    unattributed = [s for s in data["segments"] if s["speaker"] is None]
+    assert [s["text"] for s in unattributed] == ["Echo?"]
+    # Diarization only ever produced SPEAKER_00/01/02; the pseudo-speaker must
+    # never be listed as though a person could rename or exclude it.
+    assert "UNKNOWN" not in {s["id"] for s in data["speakers"]}

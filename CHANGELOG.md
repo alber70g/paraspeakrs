@@ -4,6 +4,16 @@ All notable changes to `paraspeakrs` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **`paraspeakrs agent transcribe`/`apply` now also write `transcript.json`**, a
+  machine-readable transcript (schema version 1) alongside `transcript.txt`: each
+  speaker with its label, label source, voice-library suggestion and current sample
+  file, and segments with word-level start/end timings, filtered the same way
+  `transcript.txt` is. `apply` rewrites it after every re-run.
+
 ## [0.5.0] — 2026-09-23
 
 ### Added

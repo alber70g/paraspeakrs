@@ -18,6 +18,7 @@ gets:
 | File | What it is |
 |---|---|
 | `transcript.txt` | `[HH:MM:SS] SPEAKER_00: text` lines, with a YAML header |
+| `transcript.json` | the same transcript as machine-readable JSON (schema version 1): speakers with their labels and sample files, and segments with word-level start/end times. `apply` rewrites it along with `transcript.txt` |
 | `SPEAKER_00__NAME-ME.wav` | one sample per speaker: several takes (at least 8 s if they spoke that long), separated by a beep |
 | `SPEAKER_01__Alice_0.82.wav` | the voice library recognized this speaker (score 0.82) |
 | `NEXT_STEPS.md` | the renaming instructions, written for the user |
@@ -52,7 +53,7 @@ name, or two files for one speaker makes `apply` fail and change nothing.
     paraspeakrs agent apply <out-dir> --dry-run   # show what would happen
     paraspeakrs agent apply <out-dir>             # do it
 
-This rewrites `transcript.txt` with the names. The JSON output gives each
+This rewrites `transcript.txt` and `transcript.json` with the names. The JSON output gives each
 speaker's `action` (`named`, `suggestion`, `unnamed` or `dropped`), plus any
 `merged` names. It is safe to re-run: rename again, or restore a deleted file,
 then apply again. The last state of the directory wins.

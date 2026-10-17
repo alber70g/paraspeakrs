@@ -6,8 +6,16 @@ All notable changes to `paraspeakrs` are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.5.1] — 2026-10-17
+
 ### Added
 
+- **`paraspeakrs agent diarize <audio> -o <dir>`** runs diarization, speaker embeddings
+  and voice-library suggestions without loading, downloading or asking about the ASR
+  model. It writes `diarization.json` and the per-speaker samples instead of a
+  transcript. `agent apply` works on either kind of directory. `agent diarize` reuses
+  any job that already has diarization; `agent transcribe` never reuses a
+  diarize-only job.
 - **`paraspeakrs agent transcribe`/`apply` now also write `transcript.json`**, a
   machine-readable transcript (schema version 1) alongside `transcript.txt`: each
   speaker with its label, label source, voice-library suggestion and current sample
@@ -16,6 +24,24 @@ All notable changes to `paraspeakrs` are documented here. The format follows
 - **`paraspeakrs tui <dir>`** opens the file browser in `<dir>`, so `paraspeakrs tui .`
   starts where you are. The directory replaces the remembered one. A path that is not a
   directory fails before any model loads.
+
+### Fixed
+
+- **ASR chunks no longer grow past the 90 s target.** Chunks closed only between speaker
+  turns, so a silent lead-in or tail, a long gap between turns or one long monologue was
+  transcribed as a single chunk of any length. Memory grows quadratically with chunk length:
+  a 59-minute meeting with 6.6 silent minutes at the end peaked at 8.5 GB instead of 3.5 GB,
+  and decoding took 83 s instead of 62 s. Such stretches are now split into fixed windows
+  with the usual overlap.
+- **A silent track no longer crashes the speakrs backend.** `speakrs-diar` panicked
+  with `ndarray: index out of bounds` (exit 101) on audio without speech. The sidecar
+  now treats such audio as having no speakers (`paraspeakrs-speakrs` 0.5.1), and the
+  backend skips the sidecar for a track whose peak is below -60 dBFS.
+- **`agent diarize` and `agent transcribe` write an empty result when no speaker is
+  found**, instead of failing with `FileNotFoundError` on `manifest.json`.
+- **A job reused by fingerprint cuts its samples from the file just passed in** when
+  its original recording is gone. Rerunning a meeting from a deleted temporary WAV
+  failed with "original recording is no longer at ...".
 
 ## [0.5.0] — 2026-09-23
 
@@ -39,15 +65,6 @@ All notable changes to `paraspeakrs` are documented here. The format follows
   directories exist nothing is merged: the new one is used and the old one is left
   untouched. If the move fails, the old directory stays in use rather than opening an empty
   workspace. `PARAKEET_WORKSPACE_DIR` is still honoured and is never moved.
-
-### Fixed
-
-- **ASR chunks no longer grow past the 90 s target.** Chunks closed only between speaker
-  turns, so a silent lead-in or tail, a long gap between turns or one long monologue was
-  transcribed as a single chunk of any length. Memory grows quadratically with chunk length:
-  a 59-minute meeting with 6.6 silent minutes at the end peaked at 8.5 GB instead of 3.5 GB,
-  and decoding took 83 s instead of 62 s. Such stretches are now split into fixed windows
-  with the usual overlap.
 
 ## [0.4.1] — 2026-09-23
 

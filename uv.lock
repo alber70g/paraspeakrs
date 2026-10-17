@@ -1073,7 +1073,7 @@ wheels = [
 
 [[package]]
 name = "paraspeakrs"
-version = "0.5.0"
+version = "0.5.1"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
@@ -1157,10 +1157,10 @@ dev = [
 
 [[package]]
 name = "paraspeakrs-speakrs"
-version = "0.2.0"
+version = "0.5.0"
 source = { registry = "https://pypi.org/simple" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/3c/62/080d91530ed7b0a979222267a05c3eba74c8a410f7f003581fe3b29405f6/paraspeakrs_speakrs-0.2.0-py3-none-macosx_11_0_arm64.whl", hash = "sha256:e87a6c0fe1e48c2478d9348e58c2f08052f33710a30aeaf8a5ebd90b922802a6", size = 11458818, upload-time = "2026-09-18T12:37:51.532Z" },
+    { url = "https://files.pythonhosted.org/packages/d3/23/eff014290a6f92adf7cc4d649198ad5a7c7c456fbae05913b60497fcb0a0/paraspeakrs_speakrs-0.5.0-py3-none-macosx_11_0_arm64.whl", hash = "sha256:9dd5b6ffa6c5232abd2ad742c6a29adbde7ee863fad9d582d39dc427fec4b021", size = 11458773, upload-time = "2026-09-23T14:07:26.812Z" },
 ]
 
 [[package]]

@@ -637,10 +637,12 @@ export PARAKEET_WORKSPACE_DIR="./var"   # job artifacts + speaker cache live her
 export PARAKEET_RECORDINGS_DIR="$HOME/Library/Application Support/MacParakeet/meeting-recordings"
 
 paraspeakrs tui
+paraspeakrs tui .                     # open the file browser in this directory instead
 ```
 
-The TUI reads configuration from the environment only — it takes no command-line
-flags, so `SPEAKRS_BIN` and friends must be exported rather than passed.
+The optional directory argument overrides the remembered one, and is remembered
+in its place. Everything else is read from the environment only — the TUI takes no
+command-line flags, so `SPEAKRS_BIN` and friends must be exported rather than passed.
 
 ### One screen: lists on the left, the selected recording on the right
 

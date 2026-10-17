@@ -46,7 +46,14 @@ def _main() -> None:
     parser.add_argument("--version", action="version", version=f"paraspeakrs {__version__}")
     subparsers = parser.add_subparsers(dest="command", required=True)
     env = Settings.from_env()
-    subparsers.add_parser("tui", help="launch the terminal UI (needs the 'tui' extra)")
+    tui_parser = subparsers.add_parser("tui", help="launch the terminal UI (needs the 'tui' extra)")
+    tui_parser.add_argument(
+        "start_dir",
+        nargs="?",
+        type=Path,
+        default=None,
+        help="directory the file browser opens in (default: where you left it last time)",
+    )
     subparsers.add_parser("mcp", help="run the MCP server (needs the 'mcp' extra); see `paraspeakrs mcp --help`")
     fetch_parser = subparsers.add_parser("fetch-models", help="download the ASR model ahead of first use")
     fetch_parser.add_argument(
@@ -108,7 +115,7 @@ def _main() -> None:
     if args.command == "tui":
         from .tui import main as tui_main
 
-        tui_main()
+        tui_main(args.start_dir)
         return
     if args.command == "fetch-models":
         from .model_fetch import ensure_sherpa_model, model_is_present

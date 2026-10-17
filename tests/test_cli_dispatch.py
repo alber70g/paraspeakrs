@@ -34,13 +34,40 @@ def test_mcp_with_no_flags_still_dispatches(monkeypatch):
 
 
 def test_tui_dispatches(monkeypatch):
-    called: list[bool] = []
-    monkeypatch.setattr("paraspeakrs.tui.main", lambda: called.append(True))
+    called: list[object] = []
+    monkeypatch.setattr("paraspeakrs.tui.main", lambda start_dir=None: called.append(start_dir))
     monkeypatch.setattr(cli.sys, "argv", ["paraspeakrs", "tui"])
 
     cli._main()
 
-    assert called == [True]
+    # No argument leaves the browser where the user left it last time.
+    assert called == [None]
+
+
+def test_tui_passes_the_start_directory(monkeypatch):
+    """`paraspeakrs tui .` opens the browser in the directory the user is standing in."""
+    from pathlib import Path
+
+    called: list[object] = []
+    monkeypatch.setattr("paraspeakrs.tui.main", lambda start_dir=None: called.append(start_dir))
+    monkeypatch.setattr(cli.sys, "argv", ["paraspeakrs", "tui", "."])
+
+    cli._main()
+
+    assert called == [Path(".")]
+
+
+def test_tui_rejects_a_start_path_that_is_not_a_directory(monkeypatch, tmp_path, capsys):
+    """A typo must fail at once, before minutes of model loading, not open the TUI elsewhere."""
+    from paraspeakrs import tui
+
+    monkeypatch.setattr(tui, "build_pipeline", lambda settings: pytest.fail("pipeline built for a bad path"))
+
+    with pytest.raises(SystemExit) as excinfo:
+        tui.main(tmp_path / "missing")
+
+    assert excinfo.value.code == 2
+    assert "not a directory" in capsys.readouterr().err
 
 
 def test_expected_failures_exit_2_without_a_traceback(monkeypatch, capsys):

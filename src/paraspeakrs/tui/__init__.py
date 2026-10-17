@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 
 from ..config import Settings
 from ..factory import build_pipeline, describe_asr
@@ -9,7 +10,13 @@ from ..mcp_store import ArtifactStore
 from .logfile import configure_logging
 
 
-def main() -> None:
+def main(start_dir: Path | None = None) -> None:
+    if start_dir is not None:
+        start_dir = start_dir.expanduser().resolve()
+        # Checked before the pipeline loads, so a typo costs no model load.
+        if not start_dir.is_dir():
+            print(f"not a directory: {start_dir}", file=sys.stderr)
+            raise SystemExit(2)
     settings = Settings.from_env()
     try:
         from .app import DiarizeApp
@@ -42,6 +49,9 @@ def main() -> None:
     workspace = LabelingWorkspace(pipeline, store)
 
     app = DiarizeApp(workspace, settings.workspace_dir / "ui-state.json")
+    if start_dir is not None:
+        # An explicit directory beats the remembered one, and becomes the new memory.
+        app.state.remember_dir(start_dir)
     app.log_path = configure_logging(settings.workspace_dir)
     # The startup line on stderr is gone once the TUI takes the screen; the header stays.
     app.sub_title = f"ASR: {describe_asr(pipeline.asr)}"

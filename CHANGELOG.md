@@ -13,6 +13,9 @@ All notable changes to `paraspeakrs` are documented here. The format follows
   speaker with its label, label source, voice-library suggestion and current sample
   file, and segments with word-level start/end timings, filtered the same way
   `transcript.txt` is. `apply` rewrites it after every re-run.
+- **`paraspeakrs tui <dir>`** opens the file browser in `<dir>`, so `paraspeakrs tui .`
+  starts where you are. The directory replaces the remembered one. A path that is not a
+  directory fails before any model loads.
 
 ## [0.5.0] — 2026-09-23
 

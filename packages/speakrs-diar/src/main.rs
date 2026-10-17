@@ -9,6 +9,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+use ndarray::{Array2, Array3};
 use serde::Serialize;
 use speakrs::inference::ExecutionMode;
 use speakrs::pipeline::{DiarizationResult, OwnedDiarizationPipeline};
@@ -230,14 +231,21 @@ fn load_wav(path: &Path) -> Result<Vec<f32>, String> {
 /// `embeddings` is (chunks, speakers, dim) and holds non-finite values for
 /// chunk-speaker pairs that never spoke, so those are skipped too.
 fn speaker_centroids(result: &DiarizationResult) -> (usize, BTreeMap<String, Vec<f32>>) {
-    let embeddings = &result.embeddings;
-    let clusters = &result.hard_clusters;
+    centroids_from(&result.embeddings, &result.hard_clusters)
+}
+
+/// A pair with no entry in `clusters` is unassigned. On audio without speech
+/// speakrs returns embeddings for every chunk but an empty (0, 0) cluster
+/// array, and indexing it panicked.
+fn centroids_from(embeddings: &Array3<f32>, clusters: &Array2<i32>) -> (usize, BTreeMap<String, Vec<f32>>) {
     let (chunks, speakers, dim) = embeddings.dim();
 
     let mut sums: BTreeMap<i32, (Vec<f64>, usize)> = BTreeMap::new();
     for chunk in 0..chunks {
         for speaker in 0..speakers {
-            let cluster = clusters[[chunk, speaker]];
+            let Some(&cluster) = clusters.get([chunk, speaker]) else {
+                continue;
+            };
             if cluster < 0 {
                 continue;
             }
@@ -301,6 +309,34 @@ mod tests {
         let resampled = dir.join("44k.wav");
         write_wav(&resampled, 1, 44_100);
         assert!(load_wav(&resampled).unwrap_err().contains("16000 Hz"));
+    }
+
+    #[test]
+    fn audio_without_speech_has_no_centroids_instead_of_panicking() {
+        // What speakrs returns for a silent track: embeddings for every chunk,
+        // no cluster assignments at all.
+        let embeddings = Array3::<f32>::from_elem((54, 3, 4), f32::NAN);
+        let clusters = Array2::<i32>::zeros((0, 0));
+
+        let (dim, centroids) = centroids_from(&embeddings, &clusters);
+
+        assert_eq!(dim, 4);
+        assert!(centroids.is_empty());
+    }
+
+    #[test]
+    fn centroid_is_the_normalized_mean_of_a_cluster() {
+        let mut embeddings = Array3::<f32>::zeros((2, 2, 2));
+        embeddings[[0, 0, 0]] = 3.0;
+        embeddings[[1, 0, 0]] = 1.0;
+        embeddings[[0, 1, 1]] = 2.0;
+        // Chunk 1 speaker 1 is unassigned and must not count.
+        let clusters = ndarray::array![[0, 1], [0, -1]];
+
+        let (_, centroids) = centroids_from(&embeddings, &clusters);
+
+        assert_eq!(centroids["SPEAKER_00"], vec![1.0, 0.0]);
+        assert_eq!(centroids["SPEAKER_01"], vec![0.0, 1.0]);
     }
 
     #[test]

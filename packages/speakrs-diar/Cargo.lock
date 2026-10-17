@@ -1869,6 +1869,7 @@ name = "speakrs-diar"
 version = "0.1.0"
 dependencies = [
  "hound",
+ "ndarray",
  "serde",
  "serde_json",
  "speakrs",

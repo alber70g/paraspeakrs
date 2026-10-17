@@ -194,6 +194,10 @@ class SpeakrsDiarizer:
         return segments
 
     def _run_mono(self, audio_path: Path) -> tuple[list[DiarizationSegment], dict[str, list[float]]]:
+        # The sidecar panics (ndarray index out of bounds) on a track with no
+        # sound at all, where the right answer is simply nobody.
+        if self.audio.is_silent(audio_path):
+            return [], {}
         payload = self._invoke(audio_path)
         segments = [
             DiarizationSegment(

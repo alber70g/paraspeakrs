@@ -5,9 +5,15 @@ import logging
 import shutil
 import subprocess
 import urllib.request
+import wave
+from array import array
 from pathlib import Path
 
 LOGGER = logging.getLogger("uvicorn.error")
+
+# -60 dBFS. Quiet speech peaks far above this; digital silence and a muted
+# capture stay below it.
+SILENCE_PEAK = 0.001
 
 
 class AudioPreparer:
@@ -73,6 +79,23 @@ class AudioPreparer:
         ]
         _run_command(cmd, "normalize audio (preserve channels)")
         return output_path
+
+    def is_silent(self, wav_path: Path, threshold: float = SILENCE_PEAK) -> bool:
+        """Whether no sample of a 16-bit PCM WAV reaches ``threshold`` of full scale.
+
+        Diarizing a silent track has no answer, and the speakrs sidecar panics on
+        one instead of returning no speakers (a meeting where the other side never
+        made a sound). Reads in blocks, so a long recording costs little memory.
+        """
+        limit = int(threshold * 32768)
+        with wave.open(str(wav_path), "rb") as wav:
+            if wav.getsampwidth() != 2:
+                return False
+            while frames := wav.readframes(1 << 16):
+                samples = array("h", frames)
+                if samples and max(max(samples), -min(samples)) >= limit:
+                    return False
+        return True
 
     def channel_count(self, input_path: Path) -> int:
         cmd = [

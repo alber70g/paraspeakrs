@@ -1,9 +1,11 @@
 import json
 import subprocess
+import wave
 from pathlib import Path
 
 import pytest
 
+from paraspeakrs.audio import AudioPreparer
 from paraspeakrs.diarization import (
     SPEAKRS_CONTRACT_VERSION,
     SpeakrsDiarizer,
@@ -11,14 +13,19 @@ from paraspeakrs.diarization import (
 
 
 class FakeAudio:
-    """Only the two AudioPreparer methods the channel router touches."""
+    """Only the AudioPreparer methods the speakrs backend touches."""
 
-    def __init__(self, channels: int = 1) -> None:
+    def __init__(self, channels: int = 1, silent: frozenset[str] = frozenset()) -> None:
         self.channels = channels
         self.splits: list[Path] = []
+        # File names whose track has no sound at all.
+        self.silent = silent
 
     def channel_count(self, audio_path: Path) -> int:
         return self.channels
+
+    def is_silent(self, audio_path: Path) -> bool:
+        return audio_path.name in self.silent
 
     def split_stereo_to_mono(self, input_path: Path, left_path: Path, right_path: Path):
         self.splits.append(input_path)
@@ -176,3 +183,43 @@ def test_empty_result_clears_stale_centroids(tmp_path):
     diarizer.runner = _runner(payload=_payload(segments=[], centroids={}))
     assert diarizer.diarize(tmp_path / "audio.wav") == []
     assert diarizer.last_centroids == {}
+
+
+def test_a_silent_track_has_no_speakers_and_skips_the_sidecar(tmp_path):
+    """speakrs-diar panics on a track with no sound (a meeting where the other
+    side never spoke); the answer is nobody, not a failed run."""
+    runner = _runner()
+    audio = FakeAudio(silent=frozenset({"audio.wav"}))
+    diarizer = SpeakrsDiarizer(audio, binary=Path("speakrs-diar"), runner=runner)
+
+    assert diarizer.diarize(tmp_path / "audio.wav") == []
+    assert runner.calls == []
+    assert diarizer.last_centroids == {}
+
+
+def test_a_silent_channel_is_skipped_and_the_other_still_diarized(tmp_path):
+    runner = _runner()
+    audio = FakeAudio(channels=2, silent=frozenset({"audio-right.wav"}))
+    diarizer = SpeakrsDiarizer(audio, binary=Path("speakrs-diar"), runner=runner)
+
+    segments = diarizer.diarize(tmp_path / "audio.wav")
+
+    assert len(runner.calls) == 1
+    assert {s.speaker for s in segments} == {"L_SPEAKER_00", "L_SPEAKER_01"}
+
+
+def _wav(path: Path, samples: list[int]) -> Path:
+    with wave.open(str(path), "wb") as out:
+        out.setnchannels(1)
+        out.setsampwidth(2)
+        out.setframerate(16000)
+        out.writeframes(b"".join(value.to_bytes(2, "little", signed=True) for value in samples))
+    return path
+
+
+def test_is_silent_reads_the_peak_of_a_real_wav(tmp_path):
+    preparer = AudioPreparer()
+    # Dither-level noise, like a muted capture.
+    assert preparer.is_silent(_wav(tmp_path / "quiet.wav", [0, 3, -5, 2] * 40_000))
+    # One audible sample anywhere is enough to diarize.
+    assert not preparer.is_silent(_wav(tmp_path / "speech.wav", [0] * 100_000 + [-2000] + [0] * 10))

@@ -6,6 +6,21 @@ All notable changes to `paraspeakrs` are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Nemotron 3.5 Transcribe ASR backend** (`--asr-backend nemotron`,
+  `PARAKEET_ASR_BACKEND=nemotron`). Sends audio to a local `nemo-speech serve`
+  (NeMo-Speech.cpp, for a 24 GB GPU or a Mac) or a vLLM server and reads the transcript and
+  word timestamps from the chat-completions answer. Options: `--nemotron-server`,
+  `--nemotron-base-url`, `--nemotron-model`, `--nemotron-max-request-seconds` (default
+  1500: requests carry as much audio as the machine can hold instead of 90 s chunks) and
+  `--nemotron-context-terms`, each with a `PARAKEET_NEMOTRON_*` variable.
+- **`--diar-backend nemotron`**: optional speaker mode that takes the speakers from the
+  model's own speaker tags instead of speakrs or senko. Requests overlap by 60 s and the tags
+  of each request are matched to the previous one by voting over the words both transcribed.
+  No speakrs binary needed. It gives no voice prints, so speakers are not recognised across
+  recordings. Not yet run against a real model. See the README section on Nemotron.
+
 ## [0.5.1] — 2026-10-17
 
 ### Added

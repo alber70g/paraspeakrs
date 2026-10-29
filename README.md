@@ -37,6 +37,7 @@ working directory, so `paraspeakrs` behaves the same wherever it is launched fro
 - Two diarization backends: **speakrs** (default) and Senko — see [Diarization backends](#diarization-backends)
 - Per-speaker centroid embeddings come back from the diarizer directly — no separate embedding model
 - Parakeet TDT v3 ASR, precision chosen on first run (see [Model precision](#model-precision)), on CPU, CUDA on NVIDIA GPUs, or CoreML on macOS
+- Optional Nemotron 3.5 Transcribe backend, served over HTTP, with an optional speaker mode — see [Nemotron 3.5 Transcribe](#nemotron-35-transcribe)
 - ASR output is kept even when diarization has gaps
 
 ## Prerequisites
@@ -201,6 +202,99 @@ Supported Senko devices (`--senko-device` / `SENKO_DEVICE`):
 
 - `auto` (default), `cpu`, `cuda`, `coreml`
 
+## Nemotron 3.5 Transcribe
+
+An alternative ASR backend: NVIDIA's Nemotron 3.5 Transcribe 30B-A4B, a speech LLM that
+writes punctuated, capitalised text and can tag speakers. It does not run in this process.
+`paraspeakrs` sends each stretch of audio to a local HTTP server and reads the transcript
+and word timestamps from the answer. The Parakeet backends stay the default.
+
+```sh
+paraspeakrs run --asr-backend nemotron "$AUDIO_FILE"
+```
+
+| Flag | Environment variable | Default |
+|------|----------------------|---------|
+| `--asr-backend nemotron` | `PARAKEET_ASR_BACKEND=nemotron` | `sherpa` |
+| `--nemotron-server nemo-speech\|vllm` | `PARAKEET_NEMOTRON_SERVER` | `nemo-speech` |
+| `--nemotron-base-url` | `PARAKEET_NEMOTRON_BASE_URL` | `http://127.0.0.1:8080` |
+| `--nemotron-model` | `PARAKEET_NEMOTRON_MODEL` | `salm` (nemo-speech) or the Hugging Face id (vllm) |
+| `--nemotron-max-request-seconds` | `PARAKEET_NEMOTRON_MAX_REQUEST_SECONDS` | `1500` |
+| `--nemotron-context-terms` | `PARAKEET_NEMOTRON_CONTEXT_TERMS` | none |
+
+The base URL is the server root; a trailing `/v1` is accepted and dropped. Context terms
+(names, jargon) are added to the prompt as `Context terms: ...`. The prompt asks for a clean
+transcript: punctuation and capitalisation, fillers and accidental repetitions left out.
+
+**Request length.** The model's memory need does not grow with the recording (an hour adds
+well under 1 GiB of cache to the weights), so one request carries as much audio as the
+machine can hold instead of the usual 90 s chunk. `--nemotron-max-request-seconds` sets it;
+a longer recording is cut into requests of that length. Diarization (the default speakrs
+or senko) still decides where the speakers change.
+
+### Serving it
+
+Start one of two servers, then point `--nemotron-base-url` at it.
+
+**NeMo-Speech.cpp (`nemo-speech serve`)** is the route for a 24 GB GPU or a Mac.
+It reads GGUF files: the decoder and the encoder (`...-Encoder-F16.gguf`, 1.67 GB, required)
+from `AtomicChat/NVIDIA-Nemotron-3.5-Transcribe-30B-A4B-GGUF`.
+
+- **24 GB NVIDIA GPU:** the `AD-IQ4_NL` decoder (19.7 GB), with requests of 25 minutes
+  (the default; NVIDIA validated 29 minutes on this class of card).
+- **Mac, Metal:** works on paper but has not been tested by the GGUF author. With 32 GB use
+  `AD-IQ4_NL` and set `--nemotron-max-request-seconds 1800` (about 30 minutes is safe under
+  the Metal memory cap). With 64 GB use `Q8_0` (35 GB) and `3600` (a full hour).
+
+```sh
+nemo-speech serve --asr-model <decoder>.gguf   # see the NeMo-Speech.cpp docs for the encoder and port flags
+paraspeakrs run --asr-backend nemotron "$AUDIO_FILE"
+```
+
+Word timestamps need the encoder file to carry the CTC timestamp head; without it the server
+refuses the request.
+
+**vLLM** with NVIDIA's NeMo Speech plugin is the official route for 48-80 GB cards and
+Blackwell GPUs (BF16 on 80 GB, FP8 from 48 GB, NVFP4 on Blackwell only). Start it with
+`VLLM_PLUGINS=nemo_speechlm`, the CTC timestamp middleware and `VLLM_USE_V2_MODEL_RUNNER=0`
+as the model card describes, and use `--nemotron-server vllm`, typically with
+`--nemotron-base-url http://host:8000` and `--nemotron-max-request-seconds 3600`.
+
+If the server returns no word timestamps the transcript is still kept, assigned to the
+dominant speaker of each request as for any ASR without timestamps, with a warning.
+
+### Speaker mode: `--diar-backend nemotron`
+
+```sh
+paraspeakrs run --asr-backend nemotron --diar-backend nemotron "$AUDIO_FILE"
+```
+
+The model can tag who is speaking (up to 8 speakers). In this mode no diarizer runs and the
+speakrs binary is not needed; the speaker tags come back with the words.
+
+- Tags are only meaningful inside one request. Consecutive requests therefore overlap by
+  60 s, and each tag of a new request is matched to the earlier speaker who said the same
+  words at the same moments in the overlap (majority vote, each earlier speaker used once).
+  Tags that match nobody become new speakers.
+- Speakers appear as `SPEAKER_00`, `SPEAKER_01`, ... as usual, so naming, samples and
+  talk-time keep working. Segments come from runs of same-speaker words.
+- Recordings shorter than one request (25 minutes by default) never need the matching.
+
+Limits to know before relying on it:
+
+- **No cross-recording speaker recognition.** The speaker library is built from voice prints
+  that speakrs and senko produce; Nemotron produces none. You can still name the speakers of
+  each recording, but nothing is learned for the next one, and no names are suggested.
+- A speaker who stays silent through the whole 60 s overlap between two requests cannot be
+  matched and gets a new ID when they next speak. Recordings that fit in one request are
+  not affected.
+- Dutch speaker tagging is not an advertised capability of the model (ASR is). Try it on a
+  recording you know before trusting it.
+- Needs word timestamps; text without them gets no speaker.
+- `label-dir` and `agent diarize` need a real diarizer and refuse this backend.
+- Not tested against a real model yet: the unit tests use the documented response shapes of
+  both servers.
+
 ## Diarization backends
 
 Select with `--diar-backend` / `PARAKEET_DIAR_BACKEND`.
@@ -258,7 +352,8 @@ self-contained zip of the source plus the binary; see
 The two backends emit different embeddings (Senko 192-dim CAM++, speakrs 256-dim
 WeSpeaker), which are not comparable. The speaker cache therefore files
 speakers under the backend that produced them, and switching backends means
-re-labeling each voice once. Labels recorded before this split are read as Senko's.
+re-labeling each voice once. (`--diar-backend nemotron` produces no embeddings, so its
+namespace stays empty.) Labels recorded before this split are read as Senko's.
 
 ## Linux
 

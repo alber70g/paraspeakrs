@@ -10,8 +10,11 @@ from typing import Literal
 
 Device = Literal["cpu", "cuda", "coreml"]
 SenkoDevice = Literal["auto", "cpu", "cuda", "coreml"]
-AsrBackend = Literal["sherpa", "openai", "mock"]
-DiarBackend = Literal["senko", "speakrs"]
+AsrBackend = Literal["sherpa", "openai", "nemotron", "mock"]
+# "nemotron" takes speaker tags from the Nemotron transcription instead of running a
+# diarizer; it only works together with the nemotron ASR backend.
+DiarBackend = Literal["senko", "speakrs", "nemotron"]
+NemotronServer = Literal["nemo-speech", "vllm"]
 SpeakrsMode = Literal["cpu", "coreml", "coreml-fast", "cuda", "cuda-fast"]
 SherpaPrecision = Literal["fp32", "fp16", "int8"]
 
@@ -24,6 +27,15 @@ SherpaPrecision = Literal["fp32", "fp16", "int8"]
 SHERPA_MODEL_NAME = "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3"
 SHERPA_INT8_MODEL_NAME = "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8"
 SHERPA_FP16_MODEL_NAME = "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-fp16"
+# Nemotron is served over HTTP by either server. The base URL has no /v1 suffix.
+NEMOTRON_DEFAULT_BASE_URL = "http://127.0.0.1:8080"
+# One request may hold this much audio. 25 minutes sits under the 29 minutes NVIDIA
+# validated for a 24 GB GPU; raise it on 32 GB+ GPUs or a 64 GB Mac.
+NEMOTRON_DEFAULT_MAX_REQUEST_SECONDS = 1500.0
+# Speaker tags are only meaningful within one request. Consecutive requests share this
+# much audio so that the speakers of the next one can be matched to the previous one.
+NEMOTRON_SPEAKER_OVERLAP_SECONDS = 60.0
+
 # Only reachable from a source checkout; an installed tool gets the binary from the
 # paraspeakrs-speakrs wheel instead. Kept last in the search order so the dev workflow
 # keeps working without an env var.
@@ -156,6 +168,12 @@ class Settings:
     openai_base_url: str | None = None
     openai_api_key: str = "sk-no-key-required"
     openai_model: str = "parakeet-tdt-0.6b-v3"
+    nemotron_server: NemotronServer = "nemo-speech"
+    nemotron_base_url: str = NEMOTRON_DEFAULT_BASE_URL
+    # None picks the server's own default model name.
+    nemotron_model: str | None = None
+    nemotron_max_request_seconds: float = NEMOTRON_DEFAULT_MAX_REQUEST_SECONDS
+    nemotron_context_terms: str | None = None
     chunk_target_seconds: float = 90.0
     chunk_overlap_seconds: float = 2.0
 
@@ -168,7 +186,7 @@ class Settings:
     @classmethod
     def from_env(cls) -> "Settings":
         device = _literal("PARAKEET_DEVICE", os.getenv("PARAKEET_DEVICE", "cpu"), ("cpu", "cuda", "coreml"))
-        backend = _literal("PARAKEET_ASR_BACKEND", os.getenv("PARAKEET_ASR_BACKEND", "sherpa"), ("sherpa", "openai", "mock"))
+        backend = _literal("PARAKEET_ASR_BACKEND", os.getenv("PARAKEET_ASR_BACKEND", "sherpa"), ("sherpa", "openai", "nemotron", "mock"))
         senko_device = _literal(
             "SENKO_DEVICE",
             os.getenv("SENKO_DEVICE", "auto"),
@@ -177,7 +195,12 @@ class Settings:
         diar_backend = _literal(
             "PARAKEET_DIAR_BACKEND",
             os.getenv("PARAKEET_DIAR_BACKEND", "speakrs"),
-            ("senko", "speakrs"),
+            ("senko", "speakrs", "nemotron"),
+        )
+        nemotron_server = _literal(
+            "PARAKEET_NEMOTRON_SERVER",
+            os.getenv("PARAKEET_NEMOTRON_SERVER", "nemo-speech"),
+            ("nemo-speech", "vllm"),
         )
         speakrs_mode = _literal(
             "SPEAKRS_MODE",
@@ -216,6 +239,14 @@ class Settings:
             openai_base_url=os.getenv("PARAKEET_OPENAI_BASE_URL"),
             openai_api_key=os.getenv("PARAKEET_OPENAI_API_KEY", "sk-no-key-required"),
             openai_model=os.getenv("PARAKEET_OPENAI_MODEL", cls.openai_model),
+            nemotron_server=nemotron_server,
+            nemotron_base_url=os.getenv("PARAKEET_NEMOTRON_BASE_URL") or NEMOTRON_DEFAULT_BASE_URL,
+            nemotron_model=os.getenv("PARAKEET_NEMOTRON_MODEL") or None,
+            nemotron_max_request_seconds=_seconds(
+                "PARAKEET_NEMOTRON_MAX_REQUEST_SECONDS",
+                os.getenv("PARAKEET_NEMOTRON_MAX_REQUEST_SECONDS", str(NEMOTRON_DEFAULT_MAX_REQUEST_SECONDS)),
+            ),
+            nemotron_context_terms=os.getenv("PARAKEET_NEMOTRON_CONTEXT_TERMS") or None,
         )
 
     def validate_runtime(self, *, require_asr: bool = True) -> None:
@@ -237,6 +268,24 @@ class Settings:
                 )
         if require_asr and self.asr_backend == "openai" and not self.openai_base_url:
             raise ValueError("openai_base_url is required for OpenAI-compatible ASR")
+        if self.diar_backend == "nemotron":
+            # The speakers are read off the transcript, so there is nothing to run
+            # without ASR, and no other ASR backend writes speaker tags.
+            if self.asr_backend != "nemotron":
+                raise ValueError("diar_backend 'nemotron' reads speakers from the Nemotron transcription; it needs asr_backend 'nemotron'")
+            if not require_asr:
+                raise ValueError("diar_backend 'nemotron' reads speakers from the transcription, so it cannot diarize without running ASR")
+            if self.nemotron_max_request_seconds <= 2 * NEMOTRON_SPEAKER_OVERLAP_SECONDS:
+                raise ValueError(
+                    f"nemotron_max_request_seconds must exceed {2 * NEMOTRON_SPEAKER_OVERLAP_SECONDS:.0f} "
+                    "when speakers come from Nemotron: consecutive requests overlap by "
+                    f"{NEMOTRON_SPEAKER_OVERLAP_SECONDS:.0f} s"
+                )
+        if require_asr and self.asr_backend == "nemotron":
+            if not self.nemotron_base_url:
+                raise ValueError("nemotron_base_url is required for Nemotron ASR")
+            if self.nemotron_max_request_seconds <= 0:
+                raise ValueError("nemotron_max_request_seconds must be positive")
         if self.diar_backend == "speakrs":
             if not self.speakrs_bin.is_file():
                 raise ValueError(
@@ -258,6 +307,13 @@ def default_speakrs_mode() -> str:
     """CoreML is the fastest speakrs backend on Apple Silicon and the one the
     documented build enables; everywhere else fall back to portable CPU."""
     return "coreml" if sys.platform == "darwin" else "cpu"
+
+
+def _seconds(name: str, value: str) -> float:
+    try:
+        return float(value)
+    except ValueError:
+        raise ValueError(f"{name} must be a number of seconds") from None
 
 
 def _literal(name: str, value: str, allowed: tuple[str, ...]):

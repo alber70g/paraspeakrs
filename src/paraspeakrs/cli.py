@@ -191,7 +191,12 @@ def _add_common(parser: argparse.ArgumentParser, env: Settings) -> None:
     """
     parser.add_argument("--device", choices=["cpu", "cuda", "coreml"], default=env.device)
     parser.add_argument("--workspace-dir", type=Path, default=env.workspace_dir)
-    parser.add_argument("--diar-backend", choices=["senko", "speakrs"], default=env.diar_backend)
+    parser.add_argument(
+        "--diar-backend",
+        choices=["senko", "speakrs", "nemotron"],
+        default=env.diar_backend,
+        help="nemotron reads speakers from the Nemotron transcription (needs --asr-backend nemotron)",
+    )
     parser.add_argument("--senko-device", choices=["auto", "cpu", "cuda", "coreml"], default=env.senko_device)
     parser.add_argument("--senko-no-warmup", action="store_true")
     parser.add_argument("--speakrs-bin", type=Path, default=env.speakrs_bin)
@@ -201,7 +206,7 @@ def _add_common(parser: argparse.ArgumentParser, env: Settings) -> None:
         choices=["cpu", "coreml", "coreml-fast", "cuda", "cuda-fast"],
         default=env.speakrs_mode,
     )
-    parser.add_argument("--asr-backend", choices=["sherpa", "openai", "mock"], default=env.asr_backend)
+    parser.add_argument("--asr-backend", choices=["sherpa", "openai", "nemotron", "mock"], default=env.asr_backend)
     parser.add_argument("--sherpa-model-dir", type=Path, default=env.sherpa_model_dir)
     parser.add_argument(
         "--sherpa-precision",
@@ -214,6 +219,24 @@ def _add_common(parser: argparse.ArgumentParser, env: Settings) -> None:
     parser.add_argument("--openai-base-url", default=env.openai_base_url)
     parser.add_argument("--openai-api-key", default=env.openai_api_key)
     parser.add_argument("--openai-model", default=env.openai_model)
+    parser.add_argument("--nemotron-server", choices=["nemo-speech", "vllm"], default=env.nemotron_server)
+    parser.add_argument(
+        "--nemotron-base-url",
+        default=env.nemotron_base_url,
+        help="server root without /v1 (default: %(default)s)",
+    )
+    parser.add_argument("--nemotron-model", default=env.nemotron_model, help="served model name (default: the server's usual one)")
+    parser.add_argument(
+        "--nemotron-max-request-seconds",
+        type=float,
+        default=env.nemotron_max_request_seconds,
+        help="audio per request: 1500 for a 24 GB GPU, up to 3600 with more memory (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--nemotron-context-terms",
+        default=env.nemotron_context_terms,
+        help="names and jargon to help the transcription, e.g. 'Kubernetes, Albert'",
+    )
 
 
 def _model_dir_for(args: argparse.Namespace, env: Settings) -> Path:
@@ -250,6 +273,11 @@ def _settings_from_args(args: argparse.Namespace, env: Settings) -> Settings:
         openai_base_url=args.openai_base_url,
         openai_api_key=args.openai_api_key,
         openai_model=args.openai_model,
+        nemotron_server=args.nemotron_server,
+        nemotron_base_url=args.nemotron_base_url,
+        nemotron_model=args.nemotron_model,
+        nemotron_max_request_seconds=args.nemotron_max_request_seconds,
+        nemotron_context_terms=args.nemotron_context_terms,
     )
 
 

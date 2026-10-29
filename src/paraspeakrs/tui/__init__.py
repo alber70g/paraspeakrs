@@ -38,7 +38,7 @@ def main(start_dir: Path | None = None) -> None:
                 "wheel (macOS arm64), or point SPEAKRS_BIN at your own build",
                 file=sys.stderr,
             )
-        else:
+        elif settings.diar_backend == "senko":
             print(
                 "on macOS a Senko warmup crash is a known issue — retry with SENKO_WARMUP=0",
                 file=sys.stderr,

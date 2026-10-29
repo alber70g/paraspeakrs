@@ -11,3 +11,8 @@ Always run notification commands asynchronously in fire-and-forget style so the 
 ```
 
 Keep the message short, mention the project by name, and write it like a developer updating a manager.
+
+## Work log
+
+`WORKLOG.md` records what each working session did, what was verified, what was not and
+what is left. Read it before continuing earlier work and add an entry when you finish.

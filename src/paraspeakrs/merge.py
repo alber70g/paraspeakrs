@@ -89,7 +89,37 @@ def _merge_words(
             overlaps.update(_speaker_overlaps(word.start, word.end, diarization))
         speaker = overlaps.most_common(1)[0][0] if overlaps else "UNKNOWN"
         words.extend(word.model_copy(update={"speaker": speaker}) for word in utterance)
+    return _segments_by_speaker(words)
 
+
+def merge_asr_speaker_words(asr_segments: list[AsrSegment]) -> tuple[list[TranscriptSegment], list[str]]:
+    """Segments for ASR whose words already carry their speakers.
+
+    The counterpart of :func:`merge_asr_with_diarization` for ``--diar-backend nemotron``:
+    there is no diarization to overlay, so the speakers the words came with are kept.
+    Text without word timestamps has no speaker to keep.
+    """
+    warnings: list[str] = []
+    merged: list[TranscriptSegment] = []
+    for asr in asr_segments:
+        if asr.words:
+            merged.extend(_segments_by_speaker(asr.words))
+        elif asr.text.strip():
+            merged.append(
+                TranscriptSegment(
+                    speaker="UNKNOWN",
+                    speaker_confidence=0.0,
+                    start=asr.start,
+                    end=asr.end,
+                    text=asr.text,
+                    words=[],
+                )
+            )
+            warnings.append("ASR word timestamps unavailable; speaker tags need them, so this text has no speaker")
+    return merged, sorted(set(warnings))
+
+
+def _segments_by_speaker(words: list[Word]) -> list[TranscriptSegment]:
     segments: list[TranscriptSegment] = []
     current: list[Word] = []
     for word in words:

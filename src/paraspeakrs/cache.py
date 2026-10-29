@@ -11,8 +11,9 @@ from .models import DiarizationSegment
 
 # Embeddings from different diarization backends are not comparable: senko emits
 # 192-dim CAM++ centroids, speakrs 256-dim WeSpeaker ones. Cached speakers are
-# therefore filed under the backend that produced them.
-EMBEDDING_NAMESPACES = {"senko": "senko:192", "speakrs": "speakrs:256"}
+# therefore filed under the backend that produced them. Nemotron speaker tags carry no
+# voice print at all; its namespace stays empty and exists so the cache can be opened.
+EMBEDDING_NAMESPACES = {"senko": "senko:192", "speakrs": "speakrs:256", "nemotron": "nemotron:none"}
 
 # The flat pre-namespace {"speakers": ...} layout was only ever written by senko.
 LEGACY_NAMESPACE = EMBEDDING_NAMESPACES["senko"]

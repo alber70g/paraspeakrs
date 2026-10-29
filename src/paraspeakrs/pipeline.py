@@ -12,8 +12,9 @@ from .cache import SpeakerCache
 from .chunking import build_chunks
 from .diarization import Diarizer, collapse_channels
 from .embeddings import NullSpeakerEmbeddingExtractor, SpeakerEmbeddingExtractor
-from .merge import merge_asr_with_diarization
+from .merge import merge_asr_speaker_words, merge_asr_with_diarization
 from .models import AsrSegment, LabelingArtifacts, PipelineArtifacts, TranscriptionResult
+from .nemotron import SpeakerTagMapper, diarization_from_words
 from .snippets import export_label_snippets
 
 ProgressCallback = Callable[[str, str | None, int | None], None]
@@ -29,6 +30,7 @@ class TranscriptionPipeline:
         embedding_extractor: SpeakerEmbeddingExtractor | None = None,
         chunk_target_seconds: float = 90.0,
         chunk_overlap_seconds: float = 2.0,
+        speakers_from_asr: bool = False,
     ) -> None:
         self.diarizer = diarizer
         self.asr = asr
@@ -37,6 +39,9 @@ class TranscriptionPipeline:
         self.embedding_extractor = embedding_extractor or NullSpeakerEmbeddingExtractor()
         self.chunk_target_seconds = chunk_target_seconds
         self.chunk_overlap_seconds = chunk_overlap_seconds
+        # The ASR words arrive with their speakers (--diar-backend nemotron), so no
+        # diarizer pass runs and diarization is derived from the transcript.
+        self.speakers_from_asr = speakers_from_asr
 
     def run(
         self,
@@ -86,32 +91,45 @@ class TranscriptionPipeline:
         )
         _report(progress, "normalize", "converting audio to mono 16 kHz WAV", 10)
         normalized = self.audio.normalize_mono_16khz(raw, work_dir / "normalized.wav")
-        diar_audio = self.audio.normalize_16khz_preserving_channels(raw, work_dir / "normalized-diar.wav")
         _report(progress, "duration", "probing normalized audio duration", 15)
         duration = self.audio.duration_seconds(normalized)
-        diarization = _run_with_heartbeat(
-            progress,
-            step="diarization",
-            detail=f"running {self.diarizer.name} speaker diarization",
-            start_percent=25,
-            max_percent=44,
-            work=lambda: self.diarizer.diarize(diar_audio),
-        )
-        _report(
-            progress,
-            "diarization",
-            f"completed {self.diarizer.name} diarization: {len(diarization)} segments",
-            44,
-        )
-        _report(progress, "embeddings", "extracting speaker embeddings", 45)
-        speaker_embeddings = self.embedding_extractor.extract(diar_audio, diarization)
-        diarization, speaker_embeddings = collapse_channels(diarization, speaker_embeddings, single_speaker_channels)
-        if transcribe:
-            asr_segments = self._transcribe_chunks(work_dir, normalized, diarization, duration, progress)
-            _report(progress, "merge", "merging ASR text with diarization", 90)
-            merged, warnings = merge_asr_with_diarization(asr_segments, diarization)
+        if self.speakers_from_asr:
+            if not transcribe:
+                raise ValueError("speakers come from the transcription, so this run cannot skip ASR")
+            # No diarizer and no voice prints: the words carry their speakers, and
+            # the diarization is whatever the transcript says it is.
+            asr_segments = self._transcribe_chunks(
+                work_dir, normalized, [], duration, progress, speaker_mapper=SpeakerTagMapper()
+            )
+            diarization = diarization_from_words(asr_segments)
+            speaker_embeddings = {}
+            _report(progress, "merge", "grouping transcribed words by speaker", 90)
+            merged, warnings = merge_asr_speaker_words(asr_segments)
         else:
-            merged, warnings = [], []
+            diar_audio = self.audio.normalize_16khz_preserving_channels(raw, work_dir / "normalized-diar.wav")
+            diarization = _run_with_heartbeat(
+                progress,
+                step="diarization",
+                detail=f"running {self.diarizer.name} speaker diarization",
+                start_percent=25,
+                max_percent=44,
+                work=lambda: self.diarizer.diarize(diar_audio),
+            )
+            _report(
+                progress,
+                "diarization",
+                f"completed {self.diarizer.name} diarization: {len(diarization)} segments",
+                44,
+            )
+            _report(progress, "embeddings", "extracting speaker embeddings", 45)
+            speaker_embeddings = self.embedding_extractor.extract(diar_audio, diarization)
+            diarization, speaker_embeddings = collapse_channels(diarization, speaker_embeddings, single_speaker_channels)
+            if transcribe:
+                asr_segments = self._transcribe_chunks(work_dir, normalized, diarization, duration, progress)
+                _report(progress, "merge", "merging ASR text with diarization", 90)
+                merged, warnings = merge_asr_with_diarization(asr_segments, diarization)
+            else:
+                merged, warnings = [], []
         _report(progress, "speaker-cache", "resolving speaker labels from cache", 95)
         labels = self.speaker_cache.resolve_embeddings(speaker_embeddings)
         if not labels:
@@ -188,6 +206,7 @@ class TranscriptionPipeline:
         diarization,
         duration: float,
         progress: ProgressCallback | None = None,
+        speaker_mapper: SpeakerTagMapper | None = None,
     ) -> list[AsrSegment]:
         chunks = build_chunks(
             diarization,
@@ -208,6 +227,10 @@ class TranscriptionPipeline:
                 word.model_copy(update={"start": word.start + chunk.start, "end": word.end + chunk.start})
                 for word in result.words
             ]
+            if speaker_mapper is not None:
+                # Before the overlap head is dropped: the head is what the previous
+                # chunk's speakers are recognised by.
+                words = speaker_mapper.map_chunk(words)
             update = {
                 "start": result.start + chunk.start,
                 "end": min(chunk.end, result_end),

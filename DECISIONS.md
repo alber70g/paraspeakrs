@@ -5,6 +5,46 @@ Autonomous decisions taken without waiting for review. Newest first.
 Each entry carries its review status. **Accepted** means the user reviewed it
 after the fact and let it stand; an entry stays **Pending** until they do.
 
+## 2026-10-29 — Nemotron backend: choices the plan left open
+
+*Status: pending.*
+
+The plan fixed the shape (HTTP client for two servers, optional speaker mode with
+overlap voting). These details it did not, each settled while implementing:
+
+- **Speaker matching: one-to-one greedy vote, any single matching word counts.** Each
+  new-request tag votes for the earlier speaker who said the same word (letters and digits
+  only, case-folded) within 1 s; pairs are taken by vote count, each earlier speaker at most
+  once, and unmatched tags become new speakers.
+  - *Minimum of several votes:* guards against one coincidental match, but a speaker with
+    a single short remark in the overlap would then be split in two. A coincidental vote
+    needs the same word at the same second, which is rare.
+  - *Independent per-tag voting (two tags may take one earlier speaker):* ← rejected. Within
+    one request distinct tags are distinct people, so merging them contradicts the model.
+  - *One-to-one, no minimum:* ← chosen.
+- **A speaker silent for the whole 60 s overlap gets a new ID.** Fixing that needs voice
+  prints, which Nemotron does not return. Left as a documented limit rather than guessed.
+- **One parser accepts either response shape, whichever `--nemotron-server` says.** The
+  server setting only changes the request. Costs nothing, survives a proxy or a server that
+  starts returning both.
+- **NeMo-Speech.cpp requests carry only fields its `docs/api.md` lists.** It answers 400 to
+  anything else (`max_tokens`, `chat_template_kwargs`), so there is no `language` (the
+  prompt says "as spoken"), no temperature (greedy by default) and no token cap. vLLM gets
+  `max_tokens` 32768, as it would otherwise stop at its short default.
+- **Speaker mode files its speakers under an empty `nemotron:none` cache namespace.**
+  Reusing the speakrs namespace would list names that can never match; raising on the
+  unknown backend would crash every run. The namespace has no width, so
+  `embedding_mismatch` stays quiet.
+- **Speaker mode needs `nemotron_max_request_seconds` above 120.** With less, the 60 s
+  overlap leaves a step of under a minute per request.
+- **Text without word timestamps gets speaker `UNKNOWN` in speaker mode.** The inline
+  `<spk:N>` tags in the text could be split into segments, but without times they could not
+  be mapped across requests, so that path would be a second, untestable speaker source.
+- **`label-dir` and `agent diarize` refuse `--diar-backend nemotron`.** They need a
+  diarization pass without ASR; the placeholder diarizer says so instead of returning nothing.
+- **Stereo is not split in speaker mode.** The normalized mono track goes to the model;
+  `single_speaker_channels` has no effect there.
+
 ## 2026-09-22 — Carrying concurrent, unauthored changes into the release
 
 *Status: accepted 2026-09-22.*

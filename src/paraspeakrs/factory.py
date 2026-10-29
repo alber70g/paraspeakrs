@@ -6,10 +6,11 @@ import sys
 from .asr import MockAsr, NullAsr, OpenAICompatibleParakeetAsr, SherpaParakeetAsr
 from .audio import AudioPreparer
 from .cache import SpeakerCache, embedding_namespace
-from .config import Settings, sherpa_model_name
+from .config import NEMOTRON_SPEAKER_OVERLAP_SECONDS, Settings, sherpa_model_name
 from .diarization import SenkoDiarizer, SpeakrsDiarizer
-from .embeddings import CentroidEmbeddingExtractor
+from .embeddings import CentroidEmbeddingExtractor, NullSpeakerEmbeddingExtractor
 from .model_fetch import ensure_sherpa_model, find_sherpa_model, model_is_present, present_precision
+from .nemotron import AsrSpeakerDiarizer, NemotronTranscribeAsr
 from .pipeline import TranscriptionPipeline
 
 # Senko's Numba/OpenMP stack segfaults on macOS without these. setdefault so an
@@ -60,6 +61,9 @@ def describe_asr(asr: object) -> str:
         return f"Parakeet {precision.upper()} · {asr.model_dir}"
     if isinstance(asr, OpenAICompatibleParakeetAsr):
         return f"{asr.model} via {asr.base_url}"
+    if isinstance(asr, NemotronTranscribeAsr):
+        speakers = " with speaker tags" if asr.speakers else ""
+        return f"Nemotron Transcribe ({asr.model}) via {asr.server} at {asr.base_url}{speakers}"
     return "mock ASR"
 
 
@@ -116,6 +120,14 @@ def build_pipeline(settings: Settings, *, need_asr: bool = True) -> Transcriptio
                 settings.openai_api_key,
                 settings.openai_model,
             )
+        elif settings.asr_backend == "nemotron":
+            asr = NemotronTranscribeAsr(
+                settings.nemotron_base_url,
+                server=settings.nemotron_server,
+                model=settings.nemotron_model,
+                speakers=settings.diar_backend == "nemotron",
+                context_terms=settings.nemotron_context_terms,
+            )
         else:
             asr = MockAsr()
         # stderr: over stdio MCP, stdout is the protocol channel.
@@ -125,7 +137,11 @@ def build_pipeline(settings: Settings, *, need_asr: bool = True) -> Transcriptio
         asr = NullAsr()
 
     audio = AudioPreparer()
-    if settings.diar_backend == "speakrs":
+    embedding_extractor = None
+    if settings.diar_backend == "nemotron":
+        diarizer = AsrSpeakerDiarizer()
+        embedding_extractor = NullSpeakerEmbeddingExtractor()
+    elif settings.diar_backend == "speakrs":
         diarizer = SpeakrsDiarizer(
             audio=audio,
             binary=settings.speakrs_bin,
@@ -134,6 +150,18 @@ def build_pipeline(settings: Settings, *, need_asr: bool = True) -> Transcriptio
         )
     else:
         diarizer = SenkoDiarizer(audio=audio, device=settings.senko_device, warmup=settings.senko_warmup)
+    if embedding_extractor is None:
+        embedding_extractor = CentroidEmbeddingExtractor(diarizer)
+
+    chunk_target_seconds = settings.chunk_target_seconds
+    chunk_overlap_seconds = settings.chunk_overlap_seconds
+    if settings.asr_backend == "nemotron":
+        # Fewer, longer requests: what the server can hold, not the 90 s the local
+        # models want. With Nemotron's own speaker tags the requests overlap enough
+        # to match the speakers of one to the previous one.
+        chunk_target_seconds = settings.nemotron_max_request_seconds
+        if settings.diar_backend == "nemotron":
+            chunk_overlap_seconds = NEMOTRON_SPEAKER_OVERLAP_SECONDS
 
     return TranscriptionPipeline(
         diarizer=diarizer,
@@ -143,7 +171,8 @@ def build_pipeline(settings: Settings, *, need_asr: bool = True) -> Transcriptio
             settings.workspace_dir / "speaker-cache.json",
             namespace=embedding_namespace(settings.diar_backend),
         ),
-        embedding_extractor=CentroidEmbeddingExtractor(diarizer),
-        chunk_target_seconds=settings.chunk_target_seconds,
-        chunk_overlap_seconds=settings.chunk_overlap_seconds,
+        embedding_extractor=embedding_extractor,
+        chunk_target_seconds=chunk_target_seconds,
+        chunk_overlap_seconds=chunk_overlap_seconds,
+        speakers_from_asr=settings.diar_backend == "nemotron",
     )

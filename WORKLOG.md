@@ -42,15 +42,16 @@ Plan: `docs/plans/2026-10-29-nemotron-3.5-transcribe-backend.md`. Research:
   from their documentation only.
 - vLLM's `ctc_timestamps.words[].speaker` format is taken from the model card; the parser accepts
   an integer, `spk:N` or anything ending in digits.
-- Whether the servers' `words` carry punctuation (the segment text is built from the words) or
-  the bare canonical form is unknown; with bare words the transcript lacks punctuation.
+- Whether the servers' `words` carry punctuation is unknown. Segment text is built from the
+  words, so `with_transcript_spelling` copies the transcript's punctuation and casing onto words
+  that line up with it (difflib match on letters and digits). Words that don't line up keep the
+  aligner's spelling.
 - Dutch speaker tagging quality; the 60 s overlap size; Metal on a Mac.
 - NeMo-Speech.cpp's routing of `/v1/audio/transcriptions` to the speech LLM (unused here).
 
 ### Left
 
 - One real run per server type, with speaker mode on a recording longer than one request.
-- If the words come back without punctuation, merge the punctuated text into the words.
 - If silent-through-the-overlap speakers prove common, add voice prints for Nemotron's turns
   (the speakrs sidecar is macOS-only).
 - Version bump and release are not done.

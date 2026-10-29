@@ -719,3 +719,23 @@ def test_speaker_mode_refuses_to_skip_asr(tmp_path):
 def test_speaker_mode_placeholder_diarizer_fails_where_a_pass_is_needed(tmp_path):
     with pytest.raises(RuntimeError, match="diar-backend nemotron"):
         AsrSpeakerDiarizer().diarize(tmp_path / "x.wav")
+
+
+def test_bare_aligner_words_take_transcript_punctuation():
+    payload = {
+        "choices": [{"message": {"content": "<spk:0>Hello, world. Dit is één test!"}}],
+        "transcription": {
+            "words": [
+                {"word": "hello", "start": 0.0, "end": 0.4, "speaker": "spk:0"},
+                {"word": "world", "start": 0.5, "end": 0.9, "speaker": "spk:0"},
+                {"word": "dit", "start": 1.2, "end": 1.4, "speaker": "spk:0"},
+                {"word": "is", "start": 1.4, "end": 1.5, "speaker": "spk:0"},
+                {"word": "een", "start": 1.5, "end": 1.7, "speaker": "spk:0"},
+                {"word": "test", "start": 1.7, "end": 2.0, "speaker": "spk:0"},
+            ]
+        },
+    }
+    _, words = parse_response(payload, speakers=True)
+    # "één" does not match the aligner's "een", so that word keeps the aligner's spelling;
+    # the words around it still line up.
+    assert [word.word for word in words] == ["Hello,", "world.", "Dit", "is", "een", "test!"]

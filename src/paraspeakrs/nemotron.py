@@ -13,6 +13,7 @@ mapping and run building are tested without a server.
 from __future__ import annotations
 
 import base64
+import difflib
 import re
 import wave
 from collections import Counter, defaultdict
@@ -61,8 +62,7 @@ _TAG_PATTERN = re.compile(r"<spk:\d+>|<\|[^|>]*\|>|<think>\s*</think>")
 def normalize_base_url(base_url: str) -> str:
     """The server root. A trailing `/v1` is dropped; the endpoint path adds it back."""
     root = base_url.strip().rstrip("/")
-    if root.endswith("/v1"):
-        root = root[: -len("/v1")]
+    root = root.removesuffix("/v1")
     return root.rstrip("/")
 
 
@@ -137,7 +137,28 @@ def parse_response(payload: dict[str, Any], *, speakers: bool) -> tuple[str, lis
     transcription = payload.get("transcription")
     if not text.strip() and isinstance(transcription, dict) and isinstance(transcription.get("text"), str):
         text = transcription["text"]
-    return strip_tags(text), _parse_words(_raw_words(payload), speakers=speakers)
+    text = strip_tags(text)
+    return text, with_transcript_spelling(_parse_words(_raw_words(payload), speakers=speakers), text)
+
+
+def with_transcript_spelling(words: list[Word], text: str) -> list[Word]:
+    """Give aligned words the transcript's punctuation and casing.
+
+    The aligner may return bare words ("hello" for "Hello,"), and transcript lines are
+    built by joining words, so without this the output loses its punctuation. Words that
+    line up with a transcript token (same letters and digits) take that token's spelling;
+    the rest stay as the aligner wrote them.
+    """
+    tokens = text.split()
+    if not words or not tokens:
+        return words
+    matcher = difflib.SequenceMatcher(
+        a=[_normalized(word.word) for word in words], b=[_normalized(token) for token in tokens], autojunk=False
+    )
+    for block in matcher.get_matching_blocks():
+        for offset in range(block.size):
+            words[block.a + offset].word = tokens[block.b + offset]
+    return words
 
 
 def _raw_words(payload: dict[str, Any]) -> list[Any]:

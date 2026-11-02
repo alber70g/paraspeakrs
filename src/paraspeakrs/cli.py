@@ -13,6 +13,8 @@ from .labeling import LabelingWorkspace
 from .mcp_store import ArtifactStore
 from .models import LabelingArtifacts, PipelineArtifacts
 
+JSON_HELP = "print the full report as JSON instead of a short summary"
+
 
 def main() -> None:
     """Entry point. Expected failures exit 2 with a message, not a traceback.
@@ -92,16 +94,19 @@ def _main() -> None:
     _add_common(agent_transcribe, env)
     agent_transcribe.add_argument("audio_path", type=Path)
     agent_transcribe.add_argument("-o", "--out-dir", type=Path, required=True)
+    agent_transcribe.add_argument("--json", action="store_true", help=JSON_HELP)
     agent_diarize = agent_commands.add_parser(
         "diarize", help="diarize only (no ASR) into a directory of speaker samples"
     )
     _add_common(agent_diarize, env)
     agent_diarize.add_argument("audio_path", type=Path)
     agent_diarize.add_argument("-o", "--out-dir", type=Path, required=True)
+    agent_diarize.add_argument("--json", action="store_true", help=JSON_HELP)
     agent_apply = agent_commands.add_parser("apply", help="apply the names given by renaming the samples")
     _add_common(agent_apply, env)
     agent_apply.add_argument("out_dir", type=Path)
     agent_apply.add_argument("--dry-run", action="store_true", help="report what would change, change nothing")
+    agent_apply.add_argument("--json", action="store_true", help=JSON_HELP)
     args = parser.parse_args()
 
     if args.command == "agent" and args.agent_command == "help":
@@ -159,7 +164,7 @@ def _main() -> None:
         else:
             print(workspace.store.load(summary.job_id).result.model_dump_json(indent=2))
     elif args.command == "agent":
-        from . import agent_dir
+        from . import agent_dir, agent_text
 
         # Only `transcribe` runs ASR; `diarize` must not load, download or ask
         # about the model, and `apply` never transcribes either way.
@@ -173,7 +178,11 @@ def _main() -> None:
             report = agent_dir.diarize(workspace, args.audio_path, args.out_dir)
         else:
             report = agent_dir.apply(workspace, args.out_dir, dry_run=args.dry_run)
-        print(json.dumps(report, indent=2, ensure_ascii=False))
+        if args.json:
+            print(json.dumps(report, indent=2, ensure_ascii=False))
+        else:
+            summarize = agent_text.applied if args.agent_command == "apply" else agent_text.staged
+            print(summarize(report), end="")
     elif args.command == "label-dir":
         _label_dir(
             args.audio_dir,

@@ -124,8 +124,8 @@ def _stage(workspace: LabelingWorkspace, summary: JobSummary, out_dir: Path, *, 
         "job_id": job_id,
         "reused": summary.reused,
         "speakers": rows,
-        "next": f"Ask the user to rename the samples in {out_dir} (see {NEXT_STEPS}), "
-        f"then run: paraspeakrs agent apply {out_dir}",
+        "next": f"Ask the user to rename the samples. {NEXT_STEPS} has the rules and each speaker's "
+        f"first lines. Then run: paraspeakrs agent apply {out_dir}",
     }
     return files, report
 

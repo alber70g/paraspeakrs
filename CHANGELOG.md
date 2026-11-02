@@ -6,6 +6,14 @@ All notable changes to `paraspeakrs` are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **`paraspeakrs agent transcribe`/`diarize`/`apply` print a short plain-text summary
+  instead of JSON.** An agent reads stdout into its context, so the summary gives only
+  the output file, the sample filenames with talk time, and the next command. Each
+  speaker's first lines stay in `NEXT_STEPS.md`. Pass `--json` for the full report as
+  before.
+
 ## [0.5.1] — 2026-10-17
 
 ### Added

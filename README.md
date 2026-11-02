@@ -492,7 +492,8 @@ paraspeakrs agent transcribe meeting.m4a -o out/
 paraspeakrs agent apply out/
 ```
 
-Both commands print JSON. `paraspeakrs agent help` prints the complete guide
+Both commands print a short summary; add `--json` for the full report.
+`paraspeakrs agent help` prints the complete guide
 for agents: what renaming, merging and deleting a sample mean.
 
 ## MCP server

@@ -1,8 +1,9 @@
 # paraspeakrs agent guide
 
 Transcribe a recording and get the speakers named by the user, using only the
-command line and files. No MCP server needed. Every command prints JSON on
-stdout. Progress goes to stderr. An expected failure exits with code 2 and an
+command line and files. No MCP server needed. Every command prints a short
+summary on stdout; add `--json` for the full report as JSON. Progress goes to
+stderr. An expected failure exits with code 2 and an
 `error: …` line on stderr.
 
 ## The flow
@@ -24,14 +25,16 @@ gets:
 | `NEXT_STEPS.md` | the renaming instructions, written for the user |
 | `manifest.json` | bookkeeping for `apply`. Do not edit it |
 
-The JSON output lists each speaker with `file`, `suggested_label`, `score`,
-`talk_seconds` and `sample_lines` (their first few lines of speech).
+The summary lists each sample file with the speaker's talk time, and the
+command to run next. Each speaker's first few lines of speech are in
+`NEXT_STEPS.md`. With `--json`, each speaker has `file`, `suggested_label`,
+`score`, `talk_seconds` and `sample_lines`.
 
 ### 2. Ask the user to name the speakers
 
 You cannot hear the samples, but the user can. Tell them the directory and
-point them at `NEXT_STEPS.md`. You can offer guesses from `sample_lines`
-(people introduce themselves, or address each other by name). You may do the
+point them at `NEXT_STEPS.md`. You can offer guesses from the first lines
+listed there (people introduce themselves, or address each other by name). You may do the
 renames yourself when the user tells you the names.
 
 The part after `__` in each filename is the whole interface:
@@ -65,16 +68,17 @@ instead of `transcript.txt`/`transcript.json`:
 
 `agent apply` works the same on a directory made by `agent diarize`: it
 rewrites `diarization.json` with the names instead of `transcript.txt`/
-`transcript.json`, and its JSON output has no `lines` key.
+`transcript.json`, and its output gives no line count.
 
 ### 3. Apply the names
 
     paraspeakrs agent apply <out-dir> --dry-run   # show what would happen
     paraspeakrs agent apply <out-dir>             # do it
 
-This rewrites `transcript.txt` and `transcript.json` with the names. The JSON output gives each
-speaker's `action` (`named`, `suggestion`, `unnamed` or `dropped`), plus any
-`merged` names. It is safe to re-run: rename again, or restore a deleted file,
+This rewrites `transcript.txt` and `transcript.json` with the names. The
+summary gives one row per speaker: its ID, the `action` (`named`,
+`suggestion`, `unnamed` or `dropped`) and the name. Speakers with the same
+name are merged. `--json` also lists the `merged` names. It is safe to re-run: rename again, or restore a deleted file,
 then apply again. The last state of the directory wins.
 
 ## Notes

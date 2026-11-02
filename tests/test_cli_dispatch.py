@@ -109,9 +109,9 @@ def test_agent_help_prints_the_packaged_guide(monkeypatch, capsys):
 @pytest.mark.parametrize(
     ("argv", "expected"),
     [
-        (["agent", "transcribe", "m.m4a", "-o", "out"], ("prepare", "m.m4a", "out")),
-        (["agent", "diarize", "m.m4a", "-o", "out"], ("diarize", "m.m4a", "out")),
-        (["agent", "apply", "out", "--dry-run"], ("apply", "out", True)),
+        (["agent", "transcribe", "m.m4a", "-o", "out", "--json"], ("prepare", "m.m4a", "out")),
+        (["agent", "diarize", "m.m4a", "-o", "out", "--json"], ("diarize", "m.m4a", "out")),
+        (["agent", "apply", "out", "--dry-run", "--json"], ("apply", "out", True)),
     ],
 )
 def test_agent_commands_reach_the_directory_flow(monkeypatch, capsys, argv, expected):
@@ -127,8 +127,27 @@ def test_agent_commands_reach_the_directory_flow(monkeypatch, capsys, argv, expe
 
     cli._main()
 
-    # stdout is pure JSON, so an agent can parse it without scraping.
+    # With --json, stdout is pure JSON, so a program can parse it without scraping.
     assert tuple(json.loads(capsys.readouterr().out)["call"]) == expected
+
+
+@pytest.mark.parametrize("argv", [["agent", "transcribe", "m.m4a", "-o", "out"], ["agent", "apply", "out"]])
+def test_agent_commands_print_a_summary_not_json_by_default(monkeypatch, capsys, argv):
+    """An agent reads stdout into its context; the full JSON report only when it asks."""
+    from paraspeakrs import agent_dir
+
+    staged = {"out_dir": "out", "transcript": "out/transcript.txt", "reused": False, "speakers": [], "next": "apply"}
+    applied = {"dry_run": False, "transcript": "out/transcript.txt", "lines": 0, "speakers": [], "merged": {}}
+    monkeypatch.setattr(cli, "build_pipeline", lambda settings, need_asr=True: None)
+    monkeypatch.setattr(agent_dir, "prepare", lambda ws, audio, out: staged)
+    monkeypatch.setattr(agent_dir, "apply", lambda ws, out, dry_run: applied)
+    monkeypatch.setattr(cli.sys, "argv", ["paraspeakrs", *argv])
+
+    cli._main()
+
+    out = capsys.readouterr().out
+    assert "out/transcript.txt" in out.splitlines()[0]
+    assert "{" not in out
 
 
 def test_agent_diarize_never_asks_build_pipeline_for_asr(monkeypatch):
@@ -138,7 +157,7 @@ def test_agent_diarize_never_asks_build_pipeline_for_asr(monkeypatch):
     from paraspeakrs import agent_dir
 
     monkeypatch.setattr(agent_dir, "diarize", lambda ws, audio, out: {"call": []})
-    monkeypatch.setattr(cli.sys, "argv", ["paraspeakrs", "agent", "diarize", "m.m4a", "-o", "out"])
+    monkeypatch.setattr(cli.sys, "argv", ["paraspeakrs", "agent", "diarize", "m.m4a", "-o", "out", "--json"])
 
     cli._main()
 

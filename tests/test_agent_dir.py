@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from paraspeakrs import agent_dir
+from paraspeakrs import agent_dir, agent_text
 from paraspeakrs.cache import SpeakerCache
 from paraspeakrs.labeling import LabelingWorkspace
 from paraspeakrs.mcp_store import ArtifactStore
@@ -124,6 +124,24 @@ def test_prepare_writes_one_sample_per_speaker_and_suggests_known_voices(prepare
     assert "agent apply" in result["next"]
 
 
+def test_prepare_summary_names_the_samples_and_the_next_command_only(prepared):
+    """stdout lands in the agent's context, so the summary leaves the speech in NEXT_STEPS.md."""
+    _, out, result = prepared
+
+    summary = agent_text.staged(result)
+
+    assert summary.splitlines() == [
+        f"Wrote {out / 'transcript.txt'}",
+        f"Speaker samples in {out}:",
+        "  SPEAKER_00__NAME-ME.wav     4 s",
+        "  SPEAKER_01__Alice_1.00.wav  4 s",
+        "  SPEAKER_02__NAME-ME.wav     4 s",
+        f"Next: {result['next']}",
+    ]
+    # The agent still finds each speaker's first lines, one file read away.
+    assert "Welcome everyone." in (out / "NEXT_STEPS.md").read_text()
+
+
 def test_prepare_refuses_a_directory_with_something_in_it(tmp_path):
     out = tmp_path / "out"
     out.mkdir()
@@ -203,6 +221,20 @@ def test_dry_run_changes_nothing(prepared):
     assert result["speakers"][0] == {"speaker": "SPEAKER_00", "action": "named", "name": "Bob"}
     assert (out / "transcript.txt").read_text() == before
     assert "Bob" not in workspace.pipeline.speaker_cache.names()
+
+
+def test_apply_summary_gives_one_row_per_speaker(prepared):
+    workspace, out, _ = prepared
+    _rename(out, "SPEAKER_00__NAME-ME.wav", "SPEAKER_00__Bob.wav")
+    (out / "SPEAKER_02__NAME-ME.wav").unlink()
+
+    real = agent_text.applied(agent_dir.apply(workspace, out)).splitlines()
+    dry = agent_text.applied(agent_dir.apply(workspace, out, dry_run=True)).splitlines()
+
+    assert real[0].startswith(f"Rewrote {out / 'transcript.txt'} (")
+    assert real[1:] == ["  SPEAKER_00  named       Bob", "  SPEAKER_01  suggestion  Alice", "  SPEAKER_02  dropped"]
+    # A dry run must say so first, or the agent reports names that were never written.
+    assert dry[0].startswith("Dry run, nothing changed.")
 
 
 @pytest.mark.parametrize(

@@ -6,6 +6,8 @@ All notable changes to `paraspeakrs` are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-11-02
+
 ### Changed
 
 - **`paraspeakrs agent transcribe`/`diarize`/`apply` print a short plain-text summary

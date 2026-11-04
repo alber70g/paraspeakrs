@@ -65,7 +65,7 @@ final class Transcriber {
 
     /// A GUI app gets launchd's minimal PATH; paraspeakrs shells out to ffmpeg,
     /// which Homebrew installs outside it.
-    private static func environment() -> [String: String] {
+    static func environment() -> [String: String] {
         var env = ProcessInfo.processInfo.environment
         let extra = ["~/.local/bin", "/opt/homebrew/bin", "/usr/local/bin"].map { ($0 as NSString).expandingTildeInPath }
         env["PATH"] = (extra + [env["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"]).joined(separator: ":")

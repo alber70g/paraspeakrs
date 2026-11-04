@@ -13,7 +13,8 @@ let package = Package(
         .executableTarget(
             name: "ParaspeakrsRecorder",
             dependencies: ["RecorderCore"],
-            exclude: ["Info.plist"]
+            // Both go into the app bundle; `paraspeakrs install-recorder` copies them.
+            exclude: ["Info.plist", "Sounds"]
         ),
     ],
     swiftLanguageModes: [.v5]

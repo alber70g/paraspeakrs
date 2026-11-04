@@ -15,6 +15,13 @@ All notable changes to `paraspeakrs` are documented here. The format follows
   stdin closes. Recordings over 30 s are cut at the quietest moment between 20 and
   30 s. Neither mode downloads the model; a missing model says to run
   `paraspeakrs fetch-models`.
+- **Recorder: dictation with Ctrl+\\.** Hold Ctrl+\\ while you speak, or tap it to
+  start and tap again to stop; the text is typed into the frontmost app. The
+  clipboard is not used. Escape cancels. The model loads while you speak, so the
+  text arrives about 0.1 s after release for a 5 s dictation and 0.7 s for 45 s
+  (measured on an M5 Max). Typing needs the Accessibility permission, which the first
+  dictation asks for. Start, stop and cancel have their own sounds, and a Sounds
+  toggle in the panel turns them off. Reinstall with `paraspeakrs install-recorder`.
 
 ## [0.7.0] — 2026-11-04
 

@@ -4,6 +4,7 @@ import SwiftUI
 
 struct RecorderPanel: View {
     @ObservedObject var model: RecorderModel
+    @ObservedObject var dictation: DictationModel
     @AppStorage("paraspeakrsPath") private var executable = Transcriber.defaultExecutable
 
     var body: some View {
@@ -45,6 +46,9 @@ struct RecorderPanel: View {
             if model.transcribing > 0 {
                 Text("Transcribing: \(model.transcribing) in queue").foregroundStyle(.secondary)
             }
+
+            Divider()
+            DictationSection(dictation: dictation)
 
             Divider()
             Text("paraspeakrs executable").font(.caption).foregroundStyle(.secondary)

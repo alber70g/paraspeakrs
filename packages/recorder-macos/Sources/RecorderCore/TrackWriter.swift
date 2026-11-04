@@ -1,7 +1,7 @@
 import AudioToolbox
 import Foundation
 
-/// Writes one mono track to a 48 kHz CAF file, locked to host time.
+/// Writes one mono 16-bit track to a 48 kHz CAF (or WAV) file, locked to host time.
 ///
 /// The mic and the system-audio tap run on different device clocks, and the
 /// tap delivers nothing at all while no app plays sound. Each track therefore
@@ -29,11 +29,12 @@ final class TrackWriter {
     private var scratch: [Float] = []
     private var failure: CoreAudioError?
 
-    init(url: URL, startHostTime: UInt64) throws {
+    /// `kAudioFileWAVEType` for dictation, which paraspeakrs reads without ffmpeg.
+    init(url: URL, startHostTime: UInt64, fileType: AudioFileTypeID = kAudioFileCAFType) throws {
         self.url = url
         self.startHostTime = startHostTime
         var format = Self.pcmFormat(rate: Self.fileRate, channels: 1, float: false)
-        try check(ExtAudioFileCreateWithURL(url as CFURL, kAudioFileCAFType, &format, nil,
+        try check(ExtAudioFileCreateWithURL(url as CFURL, fileType, &format, nil,
                                             AudioFileFlags.eraseFile.rawValue, &file), "create \(url.path)")
         // A track that never receives a buffer (no permission, nothing played)
         // still needs a rate to be padded with silence on finish.

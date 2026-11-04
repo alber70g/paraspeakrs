@@ -52,3 +52,9 @@ def test_install_recorder_needs_no_pipeline_settings(monkeypatch):
     cli._main()
 
     assert seen == [{"dest_dir": recorder_install.DEFAULT_DEST, "identity": None, "open_app": False}]
+
+
+def test_the_dictation_sounds_ship_with_the_swift_sources():
+    """The installer copies them into the app bundle and fails without them."""
+    sounds = recorder_install.find_sources() / "Sources" / "ParaspeakrsRecorder" / "Sounds"
+    assert {path.name for path in sounds.iterdir()} >= {"dictation-start.wav", "dictation-stop.wav", "dictation-cancel.wav"}

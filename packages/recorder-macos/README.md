@@ -33,14 +33,51 @@ mute/unmute in Microsoft Teams for Mac, and the recorder takes it first: while t
 recorder runs, ⌘⇧M no longer mutes you in Teams. If another app already holds
 ⌘⇧M, the panel says so and only the button works.
 
+## Dictation
+
+Ctrl+\ types what you say into the frontmost app. Hold it while you speak, or
+tap it to start and tap it again to stop. Escape cancels; so does Escape while
+Ctrl+\ is still held. Sounds: a low click on start, a higher click on stop, a
+whoosh on cancel, Basso when nothing could be typed. The panel's Sounds toggle
+turns them all off. The sound files are from Pixabay, under the Pixabay
+Content License, not MIT: see `Sources/ParaspeakrsRecorder/Sounds/LICENSE.md`.
+
+The text is typed with synthetic key events. The clipboard is neither read nor
+written. Typing needs the Accessibility permission, which the first dictation
+asks for. When the text cannot be typed, the panel shows it with a Copy button.
+
+On key-down the app starts `paraspeakrs dictate --serve`, which loads the model
+while you speak; after release only the transcription is left. The process exits
+once the text is typed, so no memory is held between dictations. The model has to
+be on disk already (`paraspeakrs fetch-models`): a dictation never downloads it.
+Each dictation is logged in `~/Library/Logs/Paraspeakrs Recorder/dictation.log`.
+
+Measured on an Apple M5 Max (6 performance and 12 efficiency cores, 128 GB) with
+the FP32 model, 2026-11-04:
+
+| Phase | Time | CPU | Memory (RSS) |
+|---|---|---|---|
+| Process start and model load, while you speak | 1.0 s | 5.2 cores | 2.3 GB |
+| 5 s dictation, from release to text | 0.12 s | 3.8 cores | 2.6 GB |
+| 45 s dictation, from release to text | 0.74 s | 3.8 cores | 2.8 GB |
+| Between dictations | no process | | the menu-bar app: 20 MB |
+
+The GPU stays at 0 %: sherpa-onnx runs on the CPU, with 4 threads by default
+(`PARAKEET_SHERPA_THREADS`). The process peaks at 2.56 GB memory footprint.
+
+An app that reads keys through an event tap gets Ctrl+\ first. MacParakeet with
+its dictation shortcut on Ctrl+\ is one: quit it or give it another shortcut.
+
 ## Permissions
 
-The first recording asks for two permissions. Neither is Screen Recording.
+The first recording asks for two permissions, the first dictation for
+Accessibility. None of them is Screen Recording.
 
 | Prompt | Where to change it later |
 |---|---|
 | Microphone | Privacy & Security → Microphone |
 | System Audio Recording Only | Privacy & Security → Screen & System Audio Recording |
+| Accessibility (dictation only, to type) | Privacy & Security → Accessibility |
 
 Without the system-audio permission the recording still works, but the right
 channel is silent. The app warns after 30 s without system audio. It shows the

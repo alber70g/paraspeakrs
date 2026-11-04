@@ -70,6 +70,7 @@ def install(*, dest_dir: Path, identity: str | None, open_app: bool) -> Path:
     (staged / "Contents" / "MacOS").mkdir(parents=True)
     shutil.copy2(bin_dir / PRODUCT, staged / "Contents" / "MacOS" / PRODUCT)
     shutil.copy2(work / "Sources" / PRODUCT / "Info.plist", staged / "Contents" / "Info.plist")
+    shutil.copytree(work / "Sources" / PRODUCT / "Sounds", staged / "Contents" / "Resources")
 
     chosen = identity or pick_identity(_run(["security", "find-identity", "-v", "-p", "codesigning"]))
     _sign(staged, chosen)

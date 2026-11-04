@@ -26,25 +26,40 @@ If signing fails with `errSecInternalComponent`, the keychain is missing Apple's
 intermediate certificate:
 <https://www.apple.com/certificateauthority/AppleWWDRCAG3.cer>.
 
-## Shortcut
+## Shortcuts
 
-⌘⇧M starts and stops a recording from any app. It is the same combination as
-mute/unmute in Microsoft Teams for Mac, and the recorder takes it first: while the
-recorder runs, ⌘⇧M no longer mutes you in Teams. If another app already holds
-⌘⇧M, the panel says so and only the button works.
+| Shortcut | Default | Does |
+|---|---|---|
+| Meeting recording | ⇧⌘M | One press starts a recording. While recording, two presses within 0.5 s stop it. |
+| Dictation | ⌃\ | Hold to dictate, or tap to start and tap again to stop. |
+
+Click a shortcut in the panel to change it, then press the new combination. It
+needs ⌘, ⌥ or ⌃; Escape cancels. The two shortcuts must differ.
+
+⇧⌘M is mute/unmute in Microsoft Teams for Mac. The recorder only watches for the
+meeting shortcut and passes it on, so Teams still gets every press: one press
+mutes or unmutes you, and the two presses that stop the recording mute and unmute
+again. Watching keys this way needs the Accessibility permission. The dictation
+shortcut is taken before the frontmost app sees it, so it does not also type.
 
 ## Dictation
 
 Ctrl+\ types what you say into the frontmost app. Hold it while you speak, or
 tap it to start and tap it again to stop. Escape cancels; so does Escape while
-Ctrl+\ is still held. Sounds: a low click on start, a higher click on stop, a
-whoosh on cancel, Basso when nothing could be typed. The panel's Sounds toggle
-turns them all off. The sound files are from Pixabay, under the Pixabay
-Content License, not MIT: see `Sources/ParaspeakrsRecorder/Sounds/LICENSE.md`.
+Ctrl+\ is still held. Sounds: one synth tone each for start, stop and cancel,
+and Basso when nothing could be typed. The panel's Sounds toggle turns them all
+off. The tones were made for this project and are under its MIT license: see
+`Sources/ParaspeakrsRecorder/Sounds/LICENSE.md`.
 
 The text is typed with synthetic key events. The clipboard is neither read nor
 written. Typing needs the Accessibility permission, which the first dictation
 asks for. When the text cannot be typed, the panel shows it with a Copy button.
+
+The panel has two sections, Dictation on top and Meeting recording below it. The
+Dictation section lists the last 5 dictations. Clicking one closes the panel and
+types it again into the app that was frontmost before the panel opened. The list
+is kept in memory only: nothing dictated is written to disk, and it is empty
+after the app restarts.
 
 On key-down the app starts `paraspeakrs dictate --serve`, which loads the model
 while you speak; after release only the transcription is left. The process exits
@@ -77,7 +92,7 @@ Accessibility. None of them is Screen Recording.
 |---|---|
 | Microphone | Privacy & Security → Microphone |
 | System Audio Recording Only | Privacy & Security → Screen & System Audio Recording |
-| Accessibility (dictation only, to type) | Privacy & Security → Accessibility |
+| Accessibility (dictation, to type; meeting shortcut, to watch for it) | Privacy & Security → Accessibility |
 
 The panel's Permissions part shows each of the three as allowed, denied or not
 asked yet, with a button to System Settings. macOS has no public API for the

@@ -33,7 +33,7 @@ struct PermissionsSection: View {
             row("System audio", "recording", permissions.systemAudio, settings: "Privacy_ScreenCapture") {
                 Text("Asked at the first recording").font(.caption).foregroundStyle(.secondary)
             }
-            row("Accessibility", "dictation", permissions.accessibility, settings: "Privacy_Accessibility") { EmptyView() }
+            row("Accessibility", "dictation and meeting shortcut", permissions.accessibility, settings: "Privacy_Accessibility") { EmptyView() }
         }
         // Grants change in System Settings; check again while the panel is open.
         .task {

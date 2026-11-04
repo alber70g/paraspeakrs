@@ -2,8 +2,9 @@ import Carbon.HIToolbox
 
 /// A system-wide shortcut through Carbon's `RegisterEventHotKey`, which needs
 /// no Accessibility permission (an `NSEvent` global monitor does). The key is
-/// taken before the frontmost app sees it: with ⌘⇧M, Teams' own mute shortcut
-/// stops working while the recorder runs. The user chose that knowingly.
+/// taken before the frontmost app sees it, which dictation wants: Ctrl+\ must
+/// not also reach the app it types into. The meeting shortcut has to reach
+/// Teams, so it uses `KeyMonitor` instead.
 ///
 /// Every instance installs its own handler on the application target, and
 /// each handler sees every hot-key event, so it checks the id and passes on
@@ -65,20 +66,17 @@ final class GlobalHotKey {
         return true
     }
 
-    /// ⌘⇧M, start or stop a meeting recording.
-    static func meetingRecording(_ action: @escaping () -> Void) -> GlobalHotKey? {
-        GlobalHotKey(keyCode: kVK_ANSI_M, modifiers: cmdKey | shiftKey, onPress: action)
+    /// Hold to dictate, or tap to start and stop.
+    static func dictation(_ shortcut: Shortcut, onPress: @escaping () -> Void,
+                          onRelease: @escaping () -> Void) -> GlobalHotKey? {
+        GlobalHotKey(keyCode: Int(shortcut.keyCode), modifiers: Int(shortcut.modifiers),
+                     onPress: onPress, onRelease: onRelease)
     }
 
-    /// Ctrl+\, hold to dictate or tap to start and stop. `kVK_ANSI_Backslash`
-    /// is a key position: on a non-US layout it may carry another character.
-    static func dictation(onPress: @escaping () -> Void, onRelease: @escaping () -> Void) -> GlobalHotKey? {
-        GlobalHotKey(keyCode: kVK_ANSI_Backslash, modifiers: controlKey, onPress: onPress, onRelease: onRelease)
-    }
-
-    /// Escape, registered only while dictating. Also ⌃Escape: while Ctrl+\ is
-    /// held for push-to-talk, Control is still down when Escape is pressed.
-    static func cancelDictation(_ action: @escaping () -> Void) -> [GlobalHotKey] {
-        [0, controlKey].compactMap { GlobalHotKey(keyCode: kVK_Escape, modifiers: $0, onPress: action) }
+    /// Escape, registered only while dictating. Also Escape with the dictation
+    /// shortcut's modifiers: while it is held for push-to-talk, they are still
+    /// down when Escape is pressed.
+    static func cancelDictation(held modifiers: UInt32, _ action: @escaping () -> Void) -> [GlobalHotKey] {
+        Set([0, Int(modifiers)]).compactMap { GlobalHotKey(keyCode: kVK_Escape, modifiers: $0, onPress: action) }
     }
 }

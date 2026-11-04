@@ -19,8 +19,12 @@ final class RecorderModel: ObservableObject {
     @Published private(set) var systemSilent = false
     @Published private(set) var finishing = 0
     @Published private(set) var transcribing = 0
-    /// False when another app already holds ⌘⇧M.
-    @Published private(set) var hotKeyActive = false
+    /// While recording, one press of the shortcut is left to the frontmost app
+    /// (⇧⌘M mutes in Teams); two presses within this many seconds stop.
+    static let doubleTapInterval = 0.5
+
+    @Published private(set) var shortcut = Shortcut.load(shortcutKey, default: .meetingDefault)
+    private static let shortcutKey = "meetingShortcut"
 
     private(set) var capture: MeetingCapture?
     private var watchdog: Timer?
@@ -28,7 +32,8 @@ final class RecorderModel: ObservableObject {
     private var deviceObserver: DeviceChangeObserver?
     private let transcriber = Transcriber()
     private let background = DispatchQueue(label: "paraspeakrs.recorder.finish")
-    private var hotKey: GlobalHotKey?
+    private var keyMonitor: KeyMonitor?
+    private var lastPress = Date.distantPast
 
     var isRecording: Bool { startedAt != nil }
 
@@ -39,9 +44,37 @@ final class RecorderModel: ObservableObject {
             self?.errorLog = log
         }
         Notifier.requestPermission()
-        // Carbon delivers hot-key events on the main thread.
-        hotKey = GlobalHotKey.meetingRecording { [weak self] in MainActor.assumeIsolated { self?.toggle() } }
-        hotKeyActive = hotKey != nil
+        resumeShortcut()
+    }
+
+    /// Stops watching the shortcut while the panel records a new one.
+    func suspendShortcut() { keyMonitor = nil }
+
+    func resumeShortcut() {
+        keyMonitor = KeyMonitor(shortcut) { [weak self] in self?.shortcutPressed() }
+    }
+
+    /// Takes effect on the next `resumeShortcut`.
+    func setShortcut(_ new: Shortcut) {
+        shortcut = new
+        new.save(Self.shortcutKey)
+    }
+
+    /// One press starts; while recording, only a second press soon after the
+    /// first stops, so a single press can mute or unmute in the meeting app.
+    private func shortcutPressed() {
+        guard isRecording else {
+            lastPress = .distantPast
+            start()
+            return
+        }
+        let now = Date()
+        if now.timeIntervalSince(lastPress) < Self.doubleTapInterval {
+            lastPress = .distantPast
+            stop(executable: Self.executable)
+        } else {
+            lastPress = now
+        }
     }
 
     func toggle() {

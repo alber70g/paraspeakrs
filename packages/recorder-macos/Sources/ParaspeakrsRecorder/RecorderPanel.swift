@@ -1,5 +1,4 @@
 import AppKit
-import RecorderCore
 import SwiftUI
 
 struct RecorderPanel: View {
@@ -9,44 +8,10 @@ struct RecorderPanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Button(model.isRecording ? "Stop recording" : "Start recording") { model.toggle() }
-                    .keyboardShortcut(.defaultAction)
-                    .controlSize(.large)
-                Spacer()
-                Text("⌘⇧M").foregroundStyle(.secondary)
-            }
-            if !model.hotKeyActive {
-                Text("⌘⇧M is taken by another app; use the button.").foregroundStyle(.orange)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            if let startedAt = model.startedAt, let capture = model.capture {
-                TimelineView(.periodic(from: .now, by: 0.1)) { context in
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(Self.elapsed(from: startedAt, to: context.date)).monospacedDigit().font(.title3)
-                        meter("Microphone (L)", capture.levels.mic)
-                        meter("System audio (R)", capture.levels.system)
-                    }
-                }
-            }
-
-            if model.systemSilent {
-                warning("No system audio for \(Int(RecorderModel.silenceWarningSeconds)) s. If a call is playing, allow "
-                        + "Paraspeakrs Recorder under System Audio Recording.",
-                        settings: "Privacy_ScreenCapture")
-            }
-            if let error = model.error {
-                Text(error).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
-                ReportButton(message: error, log: model.errorLog)
-            }
-            if model.finishing > 0 { Text("Saving recording…").foregroundStyle(.secondary) }
-            if model.transcribing > 0 {
-                Text("Transcribing: \(model.transcribing) in queue").foregroundStyle(.secondary)
-            }
+            DictationSection(dictation: dictation, editShortcut: dictationEditing)
 
             Divider()
-            DictationSection(dictation: dictation)
+            MeetingSection(model: model, editShortcut: meetingEditing)
 
             Divider()
             PermissionsSection()
@@ -68,26 +33,34 @@ struct RecorderPanel: View {
         .frame(width: 300)
     }
 
-    private func meter(_ label: String, _ peak: Float) -> some View {
-        // -60 dBFS maps to empty, 0 dBFS to full.
-        let level = peak > 0 ? max(0, min(1, (20 * log10(Double(peak)) + 60) / 60)) : 0
-        return VStack(alignment: .leading, spacing: 2) {
-            Text(label).font(.caption).foregroundStyle(.secondary)
-            ProgressView(value: level)
-        }
-    }
-
-    private func warning(_ text: String, settings anchor: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(text).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
-            Button("Open System Settings") {
-                NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?\(anchor)")!)
+    /// Both shortcuts are off while either is recorded: a live one would take
+    /// its keys before the field sees them. The two must also differ.
+    private var dictationEditing: ShortcutEditing {
+        ShortcutEditing(begin: suspendBoth) { [model, dictation] new in
+            defer { model.resumeShortcut() }
+            if let new, new.sameKeys(as: model.shortcut) {
+                _ = dictation.endEditingShortcut(nil)
+                return "\(new.label) is the meeting recording shortcut."
             }
+            return dictation.endEditingShortcut(new)
         }
     }
 
-    private static func elapsed(from start: Date, to now: Date) -> String {
-        let seconds = Int(now.timeIntervalSince(start))
-        return String(format: "%d:%02d:%02d", seconds / 3600, seconds / 60 % 60, seconds % 60)
+    private var meetingEditing: ShortcutEditing {
+        ShortcutEditing(begin: suspendBoth) { [model, dictation] new in
+            defer {
+                model.resumeShortcut()
+                _ = dictation.endEditingShortcut(nil)
+            }
+            guard let new else { return nil }
+            if new.sameKeys(as: dictation.shortcut) { return "\(new.label) is the dictation shortcut." }
+            model.setShortcut(new)
+            return nil
+        }
+    }
+
+    private func suspendBoth() {
+        model.suspendShortcut()
+        dictation.suspendShortcut()
     }
 }

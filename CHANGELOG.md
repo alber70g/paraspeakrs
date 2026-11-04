@@ -6,6 +6,8 @@ All notable changes to `paraspeakrs` are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-11-04
+
 ### Added
 
 - **`paraspeakrs dictate FILE`** prints the transcript of one short 16-bit WAV and

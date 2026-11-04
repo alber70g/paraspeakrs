@@ -6,6 +6,8 @@ All notable changes to `paraspeakrs` are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.10.0] — 2026-11-04
+
 ### Added
 
 - **A failed `paraspeakrs install-recorder` prints a link to a new GitHub issue**
@@ -17,6 +19,23 @@ All notable changes to `paraspeakrs` are documented here. The format follows
   lines of the matching log (`dictation.log`, or the recording's `.log` when a
   transcription failed) filled in, with the home directory replaced by `~`. A failed
   transcription now also shows in the panel, not only as a notification.
+
+### Changed
+
+- **Recorder: the panel has two sections, Dictation on top and Meeting recording
+  below.** The Dictation section lists the last 5 dictations; clicking one types it
+  again into the app that was frontmost before the panel opened. The list is kept in
+  memory only. Reinstall with `paraspeakrs install-recorder`.
+- **Recorder: the shortcuts can be changed.** Click a shortcut in the panel and
+  press the new combination; Escape cancels. The labels are outlined on hover.
+- **Recorder: ⇧⌘M reaches Teams again, and stopping a recording needs two presses.**
+  The recorder watches for the meeting shortcut instead of taking it, so Teams'
+  mute/unmute keeps working. One press starts a recording; while recording, two
+  presses within 0.5 s stop it. Watching for the key needs the Accessibility
+  permission.
+- **Recorder: new dictation sounds.** Start, stop and cancel are now three synth
+  tones of about 0.25 s, made for this project and under its MIT license. They replace
+  the Pixabay clicks and whoosh, so no file in the package is under another license.
 
 ## [0.9.1] — 2026-11-04
 

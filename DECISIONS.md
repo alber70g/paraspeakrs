@@ -5,6 +5,52 @@ Autonomous decisions taken without waiting for review. Newest first.
 Each entry carries its review status. **Accepted** means the user reviewed it
 after the fact and let it stand; an entry stays **Pending** until they do.
 
+## 2026-11-04 — Recorder app: ad-hoc signature with a fixed designated requirement
+
+*Status: pending.*
+
+`security find-identity -p codesigning` lists no identities on this Mac. macOS
+ties microphone and system-audio grants to the app's code identity, and a plain
+ad-hoc signature's identity is its cdhash, which changes on every build.
+
+- **Create a self-signed code-signing certificate in the login keychain.** Stable
+  identity, grants survive rebuilds; modifies the keychain, which is security
+  configuration I do not change without asking.
+- **Plain ad-hoc signing.** Zero setup; almost certainly re-prompts for both
+  permissions after every rebuild.
+- **Ad-hoc signing with `designated => identifier "io.github.alber70g.paraspeakrs-recorder"`.**
+  ← chosen. No keychain change, and the designated requirement no longer
+  depends on the cdhash. Whether TCC honours it across rebuilds is
+  **unverified**. `CODESIGN_IDENTITY=... scripts/build-recorder-app.sh` switches
+  to a real certificate if it does not.
+
+## 2026-11-04 — Recorder: two host-time-locked tracks instead of one aggregate device
+
+*Status: accepted 2026-11-04.*
+
+The plan (`docs/plans/2026-11-04-macos-meeting-recorder-sidecar.md`) put the mic and
+the system-audio tap in one aggregate device, mic as clock. Measured in the M0 spike:
+that device delivers **no buffers at all, mic included**, while nothing plays on the
+system output. Frames stayed at 0 until `afplay` started, then ran normally. A meeting
+with a silent stretch would lose your own voice too. Whether this only happens because
+the tap had no system-audio permission (TCC refused it for iTerm2) is unverified.
+
+- **Keep the single aggregate and investigate after the permission is granted.** One
+  clock, no drift by construction; blocks M0 on a GUI permission click, and if the
+  stall is not permission-related the design is dead anyway.
+- **Mic IOProc directly on the mic device, tap in a tap-only aggregate, two mono
+  tracks locked to host time, merged on stop.** ← chosen. This was the plan's
+  documented fallback (SystemAudioKit's design). Each track pads silence when it falls
+  more than 50 ms behind host time and drops frames when it runs 50 ms ahead, so
+  drift is corrected in both directions and a stalled tap costs only the right
+  channel.
+- **Mic through AVAudioEngine instead of a HAL IOProc.** Less code for the mic side;
+  a second audio stack next to the HAL code for the tap, and its own device-change
+  behaviour to learn.
+
+Consequence: the stereo `.m4a` is written by a Swift merge step (ExtAudioFile, AAC
+128 kbps) rather than `afconvert`. A crash leaves two mono `.caf` files, not one.
+
 ## 2026-09-22 — Carrying concurrent, unauthored changes into the release
 
 *Status: accepted 2026-09-22.*

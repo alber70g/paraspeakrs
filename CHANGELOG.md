@@ -6,6 +6,8 @@ All notable changes to `paraspeakrs` are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-11-04
+
 ### Added
 
 - **`paraspeakrs run --single-speaker-channel L`** (or `R`, repeatable) treats that

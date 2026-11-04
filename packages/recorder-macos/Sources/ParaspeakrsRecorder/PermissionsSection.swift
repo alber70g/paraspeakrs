@@ -2,38 +2,46 @@ import AppKit
 import RecorderCore
 import SwiftUI
 
-/// The panel's permissions part: each grant the app needs, whether macOS has
-/// given it, and a way to change it.
-struct PermissionsSection: View {
-    @State private var microphone = PermissionStatus.unknown
-    @State private var systemAudio = PermissionStatus.unknown
-    @State private var accessibility = PermissionStatus.unknown
+/// The grants the app needs, as macOS reports them now. An `ObservableObject`
+/// rather than `@State`: with the macOS 27.0 SDK `@State` is a macro whose plugin
+/// the Command Line Tools do not ship, so `swift build` fails without Xcode.
+@MainActor
+final class Permissions: ObservableObject {
+    @Published private(set) var microphone = PermissionStatus.unknown
+    @Published private(set) var systemAudio = PermissionStatus.unknown
+    @Published private(set) var accessibility = PermissionStatus.unknown
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("Permissions").font(.caption).foregroundStyle(.secondary)
-            row("Microphone", "recording and dictation", microphone, settings: "Privacy_Microphone") {
-                Button("Allow") { Task { _ = await MicrophonePermission.request() } }
-            }
-            row("System audio", "recording", systemAudio, settings: "Privacy_ScreenCapture") {
-                Text("Asked at the first recording").font(.caption).foregroundStyle(.secondary)
-            }
-            row("Accessibility", "dictation", accessibility, settings: "Privacy_Accessibility") { EmptyView() }
-        }
-        // Grants change in System Settings; check again while the panel is open.
-        .task {
-            while !Task.isCancelled {
-                refresh()
-                try? await Task.sleep(for: .seconds(1))
-            }
-        }
-    }
-
-    private func refresh() {
+    func refresh() {
         microphone = MicrophonePermission.isGranted ? .granted : MicrophonePermission.isDenied ? .denied : .notAsked
         systemAudio = SystemAudioPermission.status
         // macOS reports only trusted or not, so "not asked" shows as denied.
         accessibility = TextTyper.isTrusted ? .granted : .denied
+    }
+}
+
+/// The panel's permissions part: each grant the app needs, whether macOS has
+/// given it, and a way to change it.
+struct PermissionsSection: View {
+    @StateObject private var permissions = Permissions()
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Permissions").font(.caption).foregroundStyle(.secondary)
+            row("Microphone", "recording and dictation", permissions.microphone, settings: "Privacy_Microphone") {
+                Button("Allow") { Task { _ = await MicrophonePermission.request() } }
+            }
+            row("System audio", "recording", permissions.systemAudio, settings: "Privacy_ScreenCapture") {
+                Text("Asked at the first recording").font(.caption).foregroundStyle(.secondary)
+            }
+            row("Accessibility", "dictation", permissions.accessibility, settings: "Privacy_Accessibility") { EmptyView() }
+        }
+        // Grants change in System Settings; check again while the panel is open.
+        .task {
+            while !Task.isCancelled {
+                permissions.refresh()
+                try? await Task.sleep(for: .seconds(1))
+            }
+        }
     }
 
     private func row(_ name: String, _ usedFor: String, _ status: PermissionStatus, settings anchor: String,

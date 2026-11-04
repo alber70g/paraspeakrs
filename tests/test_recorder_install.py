@@ -58,3 +58,35 @@ def test_the_dictation_sounds_ship_with_the_swift_sources():
     """The installer copies them into the app bundle and fails without them."""
     sounds = recorder_install.find_sources() / "Sources" / "ParaspeakrsRecorder" / "Sounds"
     assert {path.name for path in sounds.iterdir()} >= {"dictation-start.wav", "dictation-stop.wav", "dictation-cancel.wav"}
+
+
+def test_a_failed_build_shows_the_compiler_errors_not_only_build_failed():
+    """`swift build` prints the errors on stdout and only "Build failed" on stderr;
+    without the errors a user on another toolchain cannot say what broke."""
+    script = (
+        "import sys\n"
+        "print('Compiling RecorderCore')\n"
+        "print('/Users/a b/PermissionsSection.swift:9:5: error: cannot find type Foo in scope')\n"
+        "sys.stderr.write('error: Build failed\\n')\n"
+        "sys.exit(1)\n"
+    )
+    with pytest.raises(RuntimeError) as failure:
+        recorder_install._run([recorder_install.sys.executable, "-c", script])
+
+    assert "PermissionsSection.swift:9:5: error: cannot find type Foo in scope" in str(failure.value)
+    assert "Compiling RecorderCore" not in str(failure.value)
+
+
+def test_the_swift_sources_use_no_swiftui_macros_the_command_line_tools_cannot_expand():
+    """With the macOS 27.0 SDK, `@State` is a macro whose plugin ships only with Xcode;
+    `install-recorder` builds with the Command Line Tools, so the build fails there."""
+    import re
+
+    sources = recorder_install.find_sources() / "Sources"
+    offenders = [
+        f"{path.name}:{number}"
+        for path in sources.rglob("*.swift")
+        for number, line in enumerate(path.read_text().splitlines(), 1)
+        if not line.lstrip().startswith("//") and re.search(r"@State\b", line)
+    ]
+    assert offenders == []

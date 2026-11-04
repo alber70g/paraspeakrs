@@ -121,10 +121,18 @@ def _this_executable() -> Path | None:
     return resolved if os.access(resolved, os.X_OK) else None
 
 
+_COMPILER_ERROR = re.compile(r"^.+:\d+:\d+: error: ")
+
+
 def _run(cmd: list[str]) -> str:
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
         detail = (result.stderr or result.stdout).strip().splitlines()
+        # `swift build` ends with "Build failed"; the reason is in its `file:line:col: error:` lines.
+        output = f"{result.stdout}\n{result.stderr}".splitlines()
+        errors = list(dict.fromkeys(line for line in output if _COMPILER_ERROR.match(line)))
+        if errors:
+            raise RuntimeError(f"{cmd[0]} failed:" + "".join(f"\n  {line}" for line in errors[:20]))
         hint = ""
         if cmd[0] == "codesign" and "errSecInternalComponent" in (result.stderr or ""):
             hint = ("\nThe certificate's chain is incomplete. Install Apple's intermediate: "

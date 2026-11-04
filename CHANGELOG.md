@@ -12,6 +12,11 @@ All notable changes to `paraspeakrs` are documented here. The format follows
   with the title, the error, and the paraspeakrs, macOS, Swift and SDK versions
   filled in. The home directory is replaced by `~`. A missing prerequisite, such as
   no Command Line Tools, gets no link: its message already says what to install.
+- **Recorder: a Report on GitHub button under every error in the panel.** It opens
+  a new issue with the message, the paraspeakrs and macOS versions and the last 30
+  lines of the matching log (`dictation.log`, or the recording's `.log` when a
+  transcription failed) filled in, with the home directory replaced by `~`. A failed
+  transcription now also shows in the panel, not only as a notification.
 
 ## [0.9.1] — 2026-11-04
 

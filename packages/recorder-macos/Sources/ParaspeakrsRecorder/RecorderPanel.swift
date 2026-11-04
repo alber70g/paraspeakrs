@@ -38,6 +38,7 @@ struct RecorderPanel: View {
             }
             if let error = model.error {
                 Text(error).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
+                ReportButton(message: error, log: model.errorLog)
             }
             if model.finishing > 0 { Text("Saving recording…").foregroundStyle(.secondary) }
             if model.transcribing > 0 {

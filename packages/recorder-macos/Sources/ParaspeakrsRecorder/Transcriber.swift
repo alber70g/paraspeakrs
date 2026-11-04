@@ -12,6 +12,8 @@ final class Transcriber {
     private var pending = 0
     /// Called on the main queue with the number of queued or running jobs.
     var onChange: ((Int) -> Void)?
+    /// Called on the main queue with the message and the job's log.
+    var onFailure: ((String, URL) -> Void)?
 
     func enqueue(_ recording: URL, executable: String) {
         changePending(by: 1)
@@ -24,7 +26,10 @@ final class Transcriber {
                 Notifier.post(title: "Transcript ready", body: recording.lastPathComponent)
             case .failure(let message):
                 Notifier.post(title: "Transcription failed", body: message)
-                DispatchQueue.main.async { NSWorkspace.shared.activateFileViewerSelecting([recording, log]) }
+                DispatchQueue.main.async {
+                    self.onFailure?("Transcribing \(recording.lastPathComponent) failed: \(message)", log)
+                    NSWorkspace.shared.activateFileViewerSelecting([recording, log])
+                }
             }
             changePending(by: -1)
         }

@@ -20,6 +20,7 @@ struct DictationSection: View {
             }
             if let failure = dictation.failure {
                 Text(failure).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
+                ReportButton(message: failure, log: DictationTranscriber.log)
             }
             if let untyped = dictation.untyped {
                 Text(untyped).font(.callout).textSelection(.enabled).lineLimit(6)

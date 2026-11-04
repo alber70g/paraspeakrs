@@ -13,7 +13,9 @@ final class RecorderModel: ObservableObject {
     static let silenceWarningSeconds = 30.0
 
     @Published private(set) var startedAt: Date?
-    @Published private(set) var error: String?
+    @Published private(set) var error: String? { didSet { errorLog = nil } }
+    /// The log that goes with `error`, for the panel's Report button.
+    private(set) var errorLog: URL?
     @Published private(set) var systemSilent = false
     @Published private(set) var finishing = 0
     @Published private(set) var transcribing = 0
@@ -32,6 +34,10 @@ final class RecorderModel: ObservableObject {
 
     init() {
         transcriber.onChange = { [weak self] count in self?.transcribing = count }
+        transcriber.onFailure = { [weak self] message, log in
+            self?.error = message
+            self?.errorLog = log
+        }
         Notifier.requestPermission()
         // Carbon delivers hot-key events on the main thread.
         hotKey = GlobalHotKey.meetingRecording { [weak self] in MainActor.assumeIsolated { self?.toggle() } }

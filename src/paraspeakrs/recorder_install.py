@@ -16,12 +16,18 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from urllib.parse import urlencode
 
 BUNDLE_ID = "io.github.alber70g.paraspeakrs-recorder"
 APP_NAME = "Paraspeakrs Recorder.app"
 PRODUCT = "ParaspeakrsRecorder"
 DEFAULT_DEST = Path("~/Applications")
 BUILD_DIR = Path("~/Library/Caches/paraspeakrs/recorder-build")
+NEW_ISSUE = "https://github.com/alber70g/paraspeakrs/issues/new"
+
+
+class CommandFailed(RuntimeError):
+    """A command the installer ran failed; unlike a missing prerequisite, worth reporting."""
 
 
 def find_sources() -> Path:
@@ -132,10 +138,36 @@ def _run(cmd: list[str]) -> str:
         output = f"{result.stdout}\n{result.stderr}".splitlines()
         errors = list(dict.fromkeys(line for line in output if _COMPILER_ERROR.match(line)))
         if errors:
-            raise RuntimeError(f"{cmd[0]} failed:" + "".join(f"\n  {line}" for line in errors[:20]))
+            raise CommandFailed(f"{cmd[0]} failed:" + "".join(f"\n  {line}" for line in errors[:20]))
         hint = ""
         if cmd[0] == "codesign" and "errSecInternalComponent" in (result.stderr or ""):
             hint = ("\nThe certificate's chain is incomplete. Install Apple's intermediate: "
                     "https://www.apple.com/certificateauthority/AppleWWDRCAG3.cer")
-        raise RuntimeError(f"{cmd[0]} failed: {detail[-1] if detail else result.returncode}{hint}")
+        raise CommandFailed(f"{cmd[0]} failed: {detail[-1] if detail else result.returncode}{hint}")
     return result.stdout
+
+
+def issue_url(error: str) -> str:
+    """A new GitHub issue with the error and the toolchain filled in. The home
+    directory becomes `~`, so the username stays out of a public issue."""
+    from . import __version__
+
+    facts = {"paraspeakrs": __version__, "macOS": platform.mac_ver()[0], **_toolchain()}
+    log = error.replace(str(Path.home()), "~")[:3000]
+    table = "\n".join(f"| {name} | {value} |" for name, value in facts.items())
+    body = f"`paraspeakrs install-recorder` failed.\n\n| | |\n|---|---|\n{table}\n\n```\n{log}\n```\n"
+    title = f"install-recorder fails (macOS {facts['macOS']}, SDK {facts['SDK']})"
+    return f"{NEW_ISSUE}?{urlencode({'title': title, 'body': body})}"
+
+
+def _toolchain() -> dict[str, str]:
+    """The first line of `swift --version` and the SDK version, or "unknown"."""
+    def first_line(cmd: list[str]) -> str:
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        except (OSError, subprocess.TimeoutExpired):
+            return "unknown"
+        lines = (result.stdout or result.stderr).strip().splitlines()
+        return lines[0] if result.returncode == 0 and lines else "unknown"
+
+    return {"Swift": first_line(["swift", "--version"]), "SDK": first_line(["xcrun", "--show-sdk-version"])}

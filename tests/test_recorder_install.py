@@ -90,3 +90,40 @@ def test_the_swift_sources_use_no_swiftui_macros_the_command_line_tools_cannot_e
         if not line.lstrip().startswith("//") and re.search(r"@State\b", line)
     ]
     assert offenders == []
+
+
+def test_a_failed_command_offers_a_github_issue_with_the_log_and_toolchain(monkeypatch):
+    """A build failure on someone else's toolchain cannot be fixed without its log
+    and the Swift and SDK versions; the link carries them so the report is complete."""
+    from urllib.parse import parse_qs, urlparse
+
+    home = str(recorder_install.Path.home())
+    failure = recorder_install.CommandFailed(f"swift failed:\n  {home}/x/PermissionsSection.swift:8:24: error: no macro")
+    monkeypatch.setattr(recorder_install, "install", lambda **kwargs: (_ for _ in ()).throw(failure))
+    monkeypatch.setattr(recorder_install, "_toolchain", lambda: {"Swift": "Apple Swift version 6.4", "SDK": "27.0"})
+    monkeypatch.setattr(cli.sys, "argv", ["paraspeakrs", "install-recorder", "--no-open"])
+
+    with pytest.raises(RuntimeError) as raised:
+        cli._main()
+
+    url = str(raised.value).split()[-1]
+    assert url.startswith("https://github.com/alber70g/paraspeakrs/issues/new?")
+    query = parse_qs(urlparse(url).query)
+    assert "install-recorder" in query["title"][0]
+    body = query["body"][0]
+    assert "~/x/PermissionsSection.swift:8:24: error: no macro" in body
+    assert "Apple Swift version 6.4" in body and "27.0" in body
+    # The issue is public: the user's home directory, and so their username, stays out.
+    assert home not in body
+
+
+def test_a_missing_prerequisite_gets_no_issue_link(monkeypatch):
+    """"Install the Command Line Tools" is the fix, not a bug to report."""
+    monkeypatch.setattr(recorder_install, "install",
+                        lambda **kwargs: (_ for _ in ()).throw(RuntimeError("Swift is not installed.")))
+    monkeypatch.setattr(cli.sys, "argv", ["paraspeakrs", "install-recorder", "--no-open"])
+
+    with pytest.raises(RuntimeError) as raised:
+        cli._main()
+
+    assert "github.com" not in str(raised.value)

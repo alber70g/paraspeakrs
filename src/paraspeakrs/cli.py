@@ -153,11 +153,17 @@ def _main() -> None:
     if args.command == "install-recorder":
         from . import recorder_install
 
-        recorder_install.install(
-            dest_dir=args.dest or recorder_install.DEFAULT_DEST,
-            identity=args.sign,
-            open_app=not args.no_open,
-        )
+        try:
+            recorder_install.install(
+                dest_dir=args.dest or recorder_install.DEFAULT_DEST,
+                identity=args.sign,
+                open_app=not args.no_open,
+            )
+        except recorder_install.CommandFailed as exc:
+            raise RuntimeError(
+                f"{exc}\n\nReport it on GitHub; the link fills in the title and this log. "
+                f"Check the text before you submit:\n{recorder_install.issue_url(str(exc))}"
+            ) from exc
         return
     if args.command == "dictate":
         from . import dictate

@@ -6,6 +6,13 @@ All notable changes to `paraspeakrs` are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **A failed `paraspeakrs install-recorder` prints a link to a new GitHub issue**
+  with the title, the error, and the paraspeakrs, macOS, Swift and SDK versions
+  filled in. The home directory is replaced by `~`. A missing prerequisite, such as
+  no Command Line Tools, gets no link: its message already says what to install.
+
 ## [0.9.1] — 2026-11-04
 
 ### Fixed

@@ -6,6 +6,23 @@ All notable changes to `paraspeakrs` are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.9.0] — 2026-11-04
+
+### Added
+
+- **Recorder: a Permissions section in the panel.** It shows whether Microphone
+  (recording and dictation), System Audio Recording (recording) and Accessibility
+  (dictation) are allowed, denied or not asked yet, refreshed every second while the
+  panel is open, with a button to the right page in System Settings. macOS has no
+  public API for the system-audio grant, so the app reads it with the private
+  `TCCAccessPreflight`; if that call is missing, the row shows a question mark.
+  Reinstall with `paraspeakrs install-recorder`.
+
+### Fixed
+
+- **Recorder: the dictation cancel sound was about 20 dB softer than the start and
+  stop sounds.** It now plays at the same level.
+
 ## [0.8.0] — 2026-11-04
 
 ### Added

@@ -8,7 +8,7 @@ build-backend = "maturin"
 
 [project]
 name = "paraspeakrs-speakrs"
-version = "0.8.0"
+version = "0.9.0"
 description = "speakrs diarization sidecar binary for paraspeakrs"
 readme = "README.md"
 license = "MIT"

@@ -83,6 +83,15 @@ def _main() -> None:
         help="codesign identity (default: a Developer ID or Apple Development certificate if present, else ad hoc)",
     )
     recorder_parser.add_argument("--no-open", action="store_true", help="install without launching the app")
+    dictate_parser = subparsers.add_parser(
+        "dictate", help="print the text of one short 16-bit WAV (the recorder's dictation shortcut)"
+    )
+    dictate_parser.add_argument("audio_path", nargs="?", type=Path, default=None)
+    dictate_parser.add_argument(
+        "--serve",
+        action="store_true",
+        help='load the model, print {"ready": true}, then answer one JSON line per WAV path read from stdin',
+    )
     serve_parser = subparsers.add_parser("serve")
     _add_common(serve_parser, env)
     serve_parser.add_argument("--host", default="127.0.0.1")
@@ -149,6 +158,11 @@ def _main() -> None:
             identity=args.sign,
             open_app=not args.no_open,
         )
+        return
+    if args.command == "dictate":
+        from . import dictate
+
+        dictate.main(args.audio_path, serve_mode=args.serve)
         return
     if args.command == "fetch-models":
         from .model_fetch import ensure_sherpa_model, model_is_present

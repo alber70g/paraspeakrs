@@ -6,6 +6,16 @@ All notable changes to `paraspeakrs` are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **`paraspeakrs dictate FILE`** prints the transcript of one short 16-bit WAV and
+  nothing else: no job, no diarization, no ffmpeg. `paraspeakrs dictate --serve`
+  loads the model, prints `{"ready": true}`, then answers one JSON line
+  (`{"text": …}` or `{"error": …}`) per WAV path read from stdin, and exits when
+  stdin closes. Recordings over 30 s are cut at the quietest moment between 20 and
+  30 s. Neither mode downloads the model; a missing model says to run
+  `paraspeakrs fetch-models`.
+
 ## [0.7.0] — 2026-11-04
 
 ### Added

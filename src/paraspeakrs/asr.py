@@ -20,17 +20,29 @@ class SherpaParakeetAsr:
         self._recognizer = None
 
     def transcribe(self, audio_path: Path) -> AsrSegment:
-        sherpa_onnx = _import_sherpa_onnx()
-        recognizer = self._load_recognizer(sherpa_onnx)
-        stream = recognizer.create_stream()
+        self.load()
         samples, sample_rate = _read_mono_wave(audio_path)
-        stream.accept_waveform(sample_rate, samples)
-        recognizer.decode_stream(stream)
-        result = stream.result
+        result = self._decode(samples, sample_rate)
         text = getattr(result, "text", str(result)).strip()
         words = _extract_words(result)
         end = float(len(samples)) / float(sample_rate)
         return AsrSegment(text=text, start=0.0, end=end, words=words)
+
+    def transcribe_text(self, samples, sample_rate: int) -> str:
+        """Text only, from samples already in memory (`dictate` splits them first)."""
+        result = self._decode(samples, sample_rate)
+        return getattr(result, "text", str(result)).strip()
+
+    def load(self):
+        """Load the model now rather than on the first transcription."""
+        return self._load_recognizer(_import_sherpa_onnx())
+
+    def _decode(self, samples, sample_rate: int):
+        recognizer = self.load()
+        stream = recognizer.create_stream()
+        stream.accept_waveform(sample_rate, samples)
+        recognizer.decode_stream(stream)
+        return stream.result
 
     def _load_recognizer(self, sherpa_onnx):
         if self._recognizer is not None:

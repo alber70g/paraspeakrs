@@ -6,6 +6,16 @@ All notable changes to `paraspeakrs` are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.9.1] — 2026-11-04
+
+### Fixed
+
+- **`paraspeakrs install-recorder` failed to build 0.9.0 with the macOS 27.0 SDK.**
+  The Permissions section used SwiftUI's `@State`, which that SDK implements as a
+  macro whose plugin the Command Line Tools do not ship. It no longer uses `@State`.
+- **A failed recorder build now shows the compiler errors.** It printed only
+  `error: Build failed`; it now lists each `file:line:col: error:` line.
+
 ## [0.9.0] — 2026-11-04
 
 ### Added

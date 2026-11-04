@@ -1,8 +1,8 @@
 import AppKit
 import SwiftUI
 
-/// The panel's dictation part: the shortcut, the Accessibility grant typing
-/// needs, and the last transcript that could not be typed.
+/// The panel's dictation part: the shortcut and the last transcript that
+/// could not be typed. The Accessibility grant is in `PermissionsSection`.
 struct DictationSection: View {
     @ObservedObject var dictation: DictationModel
     @AppStorage(DictationSounds.enabledKey) private var sounds = true
@@ -18,14 +18,6 @@ struct DictationSection: View {
             if !dictation.hotKeyActive {
                 Text("⌃\\ is taken by another app.").foregroundStyle(.orange)
             }
-            if !dictation.accessibilityTrusted {
-                Text("Accessibility is off, so dictation cannot type.").foregroundStyle(.orange)
-                    .fixedSize(horizontal: false, vertical: true)
-                Button("Open System Settings") {
-                    NSWorkspace.shared.open(URL(string:
-                        "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
-                }
-            }
             if let failure = dictation.failure {
                 Text(failure).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
             }
@@ -36,13 +28,6 @@ struct DictationSection: View {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(untyped, forType: .string)
                 }
-            }
-        }
-        // The grant changes in System Settings; check again while the panel is open.
-        .task {
-            while !Task.isCancelled {
-                dictation.refreshTrust()
-                try? await Task.sleep(for: .seconds(1))
             }
         }
     }

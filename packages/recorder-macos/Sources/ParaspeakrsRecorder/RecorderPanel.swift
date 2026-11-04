@@ -36,9 +36,6 @@ struct RecorderPanel: View {
                         + "Paraspeakrs Recorder under System Audio Recording.",
                         settings: "Privacy_ScreenCapture")
             }
-            if model.micDenied {
-                warning("Microphone access is off.", settings: "Privacy_Microphone")
-            }
             if let error = model.error {
                 Text(error).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
             }
@@ -49,6 +46,9 @@ struct RecorderPanel: View {
 
             Divider()
             DictationSection(dictation: dictation)
+
+            Divider()
+            PermissionsSection()
 
             Divider()
             Text("paraspeakrs executable").font(.caption).foregroundStyle(.secondary)

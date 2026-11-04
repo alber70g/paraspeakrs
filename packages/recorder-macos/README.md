@@ -79,6 +79,12 @@ Accessibility. None of them is Screen Recording.
 | System Audio Recording Only | Privacy & Security → Screen & System Audio Recording |
 | Accessibility (dictation only, to type) | Privacy & Security → Accessibility |
 
+The panel's Permissions part shows each of the three as allowed, denied or not
+asked yet, with a button to System Settings. macOS has no public API for the
+system-audio grant, so the app reads it with the private `TCCAccessPreflight`,
+as AudioCap does. If that call is missing, the row shows a question mark.
+Accessibility shows only allowed or denied: macOS does not report "not asked".
+
 Without the system-audio permission the recording still works, but the right
 channel is silent. The app warns after 30 s without system audio. It shows the
 same warning when nothing is playing, because macOS reports both cases the same way.

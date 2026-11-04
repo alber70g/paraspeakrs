@@ -15,7 +15,6 @@ final class DictationModel: ObservableObject {
     @Published private(set) var phase = Phase.idle
     /// False when another app already holds Ctrl+\.
     @Published private(set) var hotKeyActive = false
-    @Published private(set) var accessibilityTrusted = TextTyper.isTrusted
     /// The last transcript that could not be typed, for the panel's Copy button.
     @Published private(set) var untyped: String?
     @Published private(set) var failure: String?
@@ -35,8 +34,6 @@ final class DictationModel: ObservableObject {
             onRelease: { [weak self] in MainActor.assumeIsolated { self?.released() } })
         hotKeyActive = hotKey != nil
     }
-
-    func refreshTrust() { accessibilityTrusted = TextTyper.isTrusted }
 
     private func pressed() {
         switch phase {
@@ -144,7 +141,6 @@ final class DictationModel: ObservableObject {
     private func fail(_ message: String, transcript: String?, keeping wav: URL? = nil) {
         failure = message
         if let transcript { untyped = transcript }
-        refreshTrust()
         phase = .idle
         DictationSounds.play(DictationSounds.failure)
         Notifier.post(title: "Dictation not typed", body: message)

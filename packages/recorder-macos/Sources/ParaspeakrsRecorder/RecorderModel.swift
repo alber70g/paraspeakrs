@@ -29,7 +29,6 @@ final class RecorderModel: ObservableObject {
     private var hotKey: GlobalHotKey?
 
     var isRecording: Bool { startedAt != nil }
-    var micDenied: Bool { MicrophonePermission.isDenied }
 
     init() {
         transcriber.onChange = { [weak self] count in self?.transcribing = count }

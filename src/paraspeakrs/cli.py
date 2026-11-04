@@ -80,6 +80,13 @@ def _main() -> None:
     run_parser.add_argument("audio_path", type=Path)
     run_parser.add_argument("--txt", action="store_true", help="print the formatted transcript instead of JSON")
     run_parser.add_argument("--force", action="store_true", help="re-transcribe even if this audio was already done")
+    run_parser.add_argument(
+        "--single-speaker-channel",
+        action="append",
+        choices=["L", "R"],
+        default=[],
+        help="stereo channel that carries one person (e.g. your own mic); repeatable",
+    )
     label_parser = subparsers.add_parser("label-dir")
     _add_common(label_parser, env)
     label_parser.add_argument("audio_dir", type=Path)
@@ -156,7 +163,11 @@ def _main() -> None:
             build_pipeline(settings),
             ArtifactStore(settings.workspace_dir / "mcp-jobs"),
         )
-        summary = workspace.transcribe(args.audio_path, force=args.force)
+        summary = workspace.transcribe(
+            args.audio_path,
+            force=args.force,
+            single_speaker_channels=frozenset(args.single_speaker_channel),
+        )
         if summary.reused:
             print(f"reusing job {summary.job_id} for identical audio", file=sys.stderr)
         if args.txt:

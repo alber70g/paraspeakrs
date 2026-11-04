@@ -162,3 +162,33 @@ def test_agent_diarize_never_asks_build_pipeline_for_asr(monkeypatch):
     cli._main()
 
     assert seen == [False]
+
+
+@pytest.mark.parametrize(
+    ("flags", "expected"),
+    [([], frozenset()), (["--single-speaker-channel", "L"], frozenset({"L"}))],
+)
+def test_run_passes_single_speaker_channels(monkeypatch, tmp_path, flags, expected):
+    """The macOS recorder puts the user's own mic on L and runs `run` headless.
+
+    Without the flag reaching the workspace, a cough or a change of tone on that
+    channel becomes a second speaker to name, which only the TUI could prevent.
+    """
+    from types import SimpleNamespace
+
+    from paraspeakrs import labeling
+
+    seen: list[frozenset[str]] = []
+
+    def fake_transcribe(self, audio_path, *, force=False, single_speaker_channels=frozenset(), progress=None):
+        seen.append(single_speaker_channels)
+        return SimpleNamespace(reused=False, job_id="job")
+
+    monkeypatch.setattr(cli, "build_pipeline", lambda settings: None)
+    monkeypatch.setattr(labeling.LabelingWorkspace, "transcribe", fake_transcribe)
+    monkeypatch.setattr(labeling.LabelingWorkspace, "transcript_text", lambda self, job_id: "")
+    monkeypatch.setattr(cli.sys, "argv", ["paraspeakrs", "run", "--workspace-dir", str(tmp_path), "--txt", *flags, "m.m4a"])
+
+    cli._main()
+
+    assert seen == [expected]

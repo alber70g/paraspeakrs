@@ -11,9 +11,20 @@ Requires macOS 15 or later on Apple Silicon, and paraspeakrs with
 ## Build and run
 
 ```sh
-scripts/build-recorder-app.sh                    # from the repo root
-open "packages/recorder-macos/build/Paraspeakrs Recorder.app"
+paraspeakrs install-recorder          # builds, installs in ~/Applications, launches
+uv run paraspeakrs install-recorder   # the same from a checkout of this repository
 ```
+
+The command builds the Swift sources that ship inside the paraspeakrs package,
+in `~/Library/Caches/paraspeakrs/recorder-build`, so a reinstall is incremental.
+It signs the app with a Developer ID or Apple Development certificate if the
+keychain has one, otherwise ad hoc. It also stores the path of the `paraspeakrs`
+that ran it, which the app calls after each recording. Options: `--dest DIR`,
+`--sign IDENTITY`, `--no-open`.
+
+If signing fails with `errSecInternalComponent`, the keychain is missing Apple's
+intermediate certificate:
+<https://www.apple.com/certificateauthority/AppleWWDRCAG3.cer>.
 
 ## Shortcut
 

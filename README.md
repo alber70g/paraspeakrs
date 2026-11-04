@@ -11,6 +11,7 @@ paraspeakrs run --txt meeting.m4a    # transcribe; models download themselves on
 paraspeakrs tui                      # the terminal UI (add --with 'paraspeakrs[tui]')
 paraspeakrs mcp                      # the MCP server (add --with 'paraspeakrs[mcp]')
 paraspeakrs agent help               # the file-based flow for coding agents, no MCP needed
+paraspeakrs install-recorder         # macOS: a menu-bar app that records meetings for paraspeakrs
 ```
 
 To install with the optional interfaces in one go:
@@ -935,6 +936,27 @@ The service exposes two representations of the same job:
   - `202` with a one-line comment while the job is `queued` or `running` (poll the same URL).
   - `409` when the job exists but `failed`.
   - `404` when the job ID is unknown.
+
+## Meeting recorder (macOS)
+
+`paraspeakrs install-recorder` builds a small menu-bar app and installs it in
+`~/Applications`. It records your microphone on the left channel and all system
+audio (the other participants) on the right. When you stop, it saves a stereo
+`.m4a` to `~/Documents/paraspeakrs-recordings/` and runs
+`paraspeakrs run --single-speaker-channel L` on it, so your voice is one `L_`
+speaker and everyone else is an `R_` speaker. The job shows up in `paraspeakrs tui`.
+
+- Needs macOS 15 or later and the Xcode Command Line Tools (`xcode-select --install`).
+- ⌘⇧M starts and stops a recording. It is also Teams' mute shortcut, and the
+  recorder takes it first while it runs.
+- The first recording asks for microphone and "System Audio Recording Only"
+  permission. It does not need Screen Recording.
+- The app is built and signed on your own Mac, so Gatekeeper does not block it.
+  With a Developer ID or Apple Development certificate in the keychain it is signed
+  with that, which keeps the permissions across reinstalls; without one it is
+  signed ad hoc. `--sign IDENTITY` picks a certificate.
+
+Details, file layout and crash recovery: [packages/recorder-macos/README.md](packages/recorder-macos/README.md).
 
 ## Stereo handling
 

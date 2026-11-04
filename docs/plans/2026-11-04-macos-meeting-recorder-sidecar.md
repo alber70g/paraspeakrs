@@ -166,7 +166,7 @@ stereo `.m4a` by Swift code on stop instead of `afconvert`. The reasoning is in 
 |---|---|
 | `--single-speaker-channel` on `paraspeakrs run` | Done; test in `tests/test_cli_dispatch.py`; full suite passes |
 | Capture core + `recorder-spike` | Done; mic track, timeline padding, rebuild gap (0.25 s) and merge verified |
-| System-audio channel | **Not verified**: needs the permission granted to the app |
-| Menu-bar app + `scripts/build-recorder-app.sh` | Builds and launches (72 MB RSS idle); recording from the UI not exercised |
+| System-audio channel | Verified on the user's 48 s test recording (R mean −30.8 dB) |
+| Menu-bar app + `paraspeakrs install-recorder` | Builds from the wheel and launches (72 MB RSS idle); a 48 s recording from the UI has audio on both channels |
 | Hand-off to paraspeakrs | Verified with the repo checkout on a synthetic stereo file; installed 0.5.1 lacks the flag |
 | AirPods / real device change | Not tested; rebuild path tested by forcing a rebuild |

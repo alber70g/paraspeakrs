@@ -71,6 +71,18 @@ def _main() -> None:
         help="fp32 (2.4 GB) and fp16 (1.2 GB) transcribe far better than int8 (490 MB). "
         "Omit to be asked, with a recommendation for this machine.",
     )
+    recorder_parser = subparsers.add_parser(
+        "install-recorder",
+        help="build the macOS meeting recorder (mic + system audio) and install it in ~/Applications",
+    )
+    recorder_parser.add_argument("--dest", type=Path, default=None, help="install directory (default: ~/Applications)")
+    recorder_parser.add_argument(
+        "--sign",
+        default=None,
+        metavar="IDENTITY",
+        help="codesign identity (default: a Developer ID or Apple Development certificate if present, else ad hoc)",
+    )
+    recorder_parser.add_argument("--no-open", action="store_true", help="install without launching the app")
     serve_parser = subparsers.add_parser("serve")
     _add_common(serve_parser, env)
     serve_parser.add_argument("--host", default="127.0.0.1")
@@ -122,12 +134,21 @@ def _main() -> None:
         print(files("paraspeakrs").joinpath("agent_guide.md").read_text(encoding="utf-8"), end="")
         return
 
-    # These three do not take the pipeline flags, so they are dispatched before
+    # These do not take the pipeline flags, so they are dispatched before
     # _settings_from_args goes looking for them.
     if args.command == "tui":
         from .tui import main as tui_main
 
         tui_main(args.start_dir)
+        return
+    if args.command == "install-recorder":
+        from . import recorder_install
+
+        recorder_install.install(
+            dest_dir=args.dest or recorder_install.DEFAULT_DEST,
+            identity=args.sign,
+            open_app=not args.no_open,
+        )
         return
     if args.command == "fetch-models":
         from .model_fetch import ensure_sherpa_model, model_is_present

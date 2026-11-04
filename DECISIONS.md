@@ -5,6 +5,26 @@ Autonomous decisions taken without waiting for review. Newest first.
 Each entry carries its review status. **Accepted** means the user reviewed it
 after the fact and let it stand; an entry stays **Pending** until they do.
 
+## 2026-11-04 — Recorder distribution: build on the user's Mac via `paraspeakrs install-recorder`
+
+*Status: pending.*
+
+The user wants others to use the recorder and asked for a command that builds and
+installs it. Without a paid Developer ID, a downloaded prebuilt app is blocked by
+Gatekeeper; an app built on the machine that runs it is not quarantined.
+
+- **Fetch the sources from GitHub at the matching tag.** Keeps the wheel small;
+  needs git and network at install time, and a tag that exists.
+- **Ship the Swift sources inside the wheel** (`paraspeakrs/recorder_macos/`, about
+  60 KB). ← chosen. Offline, always the version that matches the installed
+  paraspeakrs, and nothing extra to publish.
+- **Keep the shell script and document cloning the repo.** No Python change; every
+  user needs a checkout, which `uv tool install` users do not have.
+
+Named `install-recorder`, not `build-sidecar` as suggested: "sidecar" already means
+the speakrs diarizer binary throughout this repository. `scripts/build-recorder-app.sh`
+is removed; the command is its one implementation.
+
 ## 2026-11-04 — Recorder app: ad-hoc signature with a fixed designated requirement
 
 *Status: pending.*
@@ -22,7 +42,8 @@ ad-hoc signature's identity is its cdhash, which changes on every build.
   ← chosen. No keychain change, and the designated requirement no longer
   depends on the cdhash. Whether TCC honours it across rebuilds is
   **unverified**. `CODESIGN_IDENTITY=... scripts/build-recorder-app.sh` switches
-  to a real certificate if it does not.
+  to a real certificate if it does not. (Since replaced by `paraspeakrs
+  install-recorder`, which picks a certificate from the keychain on its own.)
 
 ## 2026-11-04 — Recorder: two host-time-locked tracks instead of one aggregate device
 

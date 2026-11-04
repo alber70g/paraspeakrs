@@ -82,10 +82,26 @@ dev = ["pytest>=8.2.0", "pytest-asyncio>=0.23.0", "textual>=0.60", "rich>=13.0",
 [tool.hatch.build.targets.wheel]
 packages = ["src/paraspeakrs"]
 
+# The Swift sources of the macOS recorder, so `paraspeakrs install-recorder` can
+# build it from an installed wheel without a checkout of this repository.
+[tool.hatch.build.targets.wheel.force-include]
+"packages/recorder-macos/Package.swift" = "paraspeakrs/recorder_macos/Package.swift"
+"packages/recorder-macos/Sources" = "paraspeakrs/recorder_macos/Sources"
+
 [tool.hatch.build.targets.sdist]
 # The checkout carries hundreds of MB of scratch output and one-off experiments
 # that have no business in a release artifact.
-include = ["src/paraspeakrs", "tests", "README.md", "LICENSE", "CHANGELOG.md", "pyproject.toml"]
+include = [
+  "src/paraspeakrs",
+  "tests",
+  "README.md",
+  "LICENSE",
+  "CHANGELOG.md",
+  "pyproject.toml",
+  # The wheel is built from the sdist, so the recorder sources must be in it too.
+  "packages/recorder-macos/Package.swift",
+  "packages/recorder-macos/Sources",
+]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

@@ -12,6 +12,14 @@ All notable changes to `paraspeakrs` are documented here. The format follows
   stereo channel as one person, as the TUI already could. Everything diarized on it
   becomes a single speaker, so a cough or a change of tone on your own headset mic no
   longer turns into a second speaker to name.
+- **`paraspeakrs install-recorder`** builds and installs a macOS menu-bar app that
+  records meetings: your microphone on the left channel, all system audio on the
+  right. On stop it saves a stereo `.m4a` (about 50 MB per hour) to
+  `~/Documents/paraspeakrs-recordings/` and transcribes it with
+  `--single-speaker-channel L`. ⌘⇧M starts and stops a recording. It needs macOS 15
+  or later and the Xcode Command Line Tools, and asks for microphone and
+  system-audio permission, not Screen Recording. The Swift sources ship in the
+  package, so no checkout is needed.
 
 ## [0.6.0] — 2026-11-02
 

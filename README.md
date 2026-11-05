@@ -994,7 +994,8 @@ diarized as `R_` speakers. Name them in `paraspeakrs tui`.
   Fedora, Debian and Arch install by default. No permission prompt. The recorder links
   the system's ALSA library (`libasound.so.2`), present on any desktop.
 - **Windows:** system audio is WASAPI loopback of the default output device. No
-  permission prompt.
+  permission prompt. A meeting app set to another output (Teams can use the "default
+  communication device") is not on that device: pick its output with `--system`.
 - The two tracks are kept on one clock: a track that falls more than 50 ms behind (a
   loopback delivers nothing while nothing plays) is padded with silence, one that runs
   ahead drops frames. After 30 s of silence on a track, the recorder warns.

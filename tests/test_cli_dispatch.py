@@ -192,3 +192,64 @@ def test_run_passes_single_speaker_channels(monkeypatch, tmp_path, flags, expect
     cli._main()
 
     assert seen == [expected]
+
+
+def _fake_recording(tmp_path):
+    from paraspeakrs.record import Recording
+
+    path = tmp_path / "2026-11-04_1430.m4a"
+    path.write_bytes(b"m4a")
+    return Recording(path=path, seconds=12.0, report={})
+
+
+def test_record_asks_about_the_asr_model_before_it_records(monkeypatch, tmp_path):
+    """After a --seconds or Ctrl+C stop, record's Enter reader still waits on stdin
+    and would take the answer to a first-run question asked afterwards."""
+    binary = tmp_path / "paraspeakrs-record"
+    binary.write_bytes(b"")
+    order: list[str] = []
+    monkeypatch.setattr("paraspeakrs.config.default_recorder_bin", lambda: binary)
+    monkeypatch.setattr("paraspeakrs.factory.settle_asr_choice", lambda s: order.append("settle") or s)
+
+    def fake_record(command, directory, **kwargs):
+        order.append("record")
+        return _fake_recording(tmp_path)
+
+    class Workspace:
+        def __init__(self, *args):
+            pass
+
+        def transcribe(self, path, single_speaker_channels):
+            order.append(f"transcribe {sorted(single_speaker_channels)}")
+            return type("Summary", (), {"job_id": "j1"})()
+
+        def transcript_text(self, job_id):
+            return "transcript\n"
+
+    monkeypatch.setattr("paraspeakrs.record.record", fake_record)
+    monkeypatch.setattr(cli, "build_pipeline", lambda settings: None)
+    monkeypatch.setattr(cli, "LabelingWorkspace", Workspace)
+    monkeypatch.setattr(cli.sys, "argv", ["paraspeakrs", "record", "--workspace-dir", str(tmp_path / "ws")])
+
+    cli._main()
+
+    assert order == ["settle", "record", "transcribe ['L']"]
+    assert (tmp_path / "2026-11-04_1430.txt").read_text(encoding="utf-8") == "transcript\n"
+
+
+def test_record_without_the_binary_says_where_it_comes_from(monkeypatch, tmp_path):
+    monkeypatch.setattr("paraspeakrs.config.default_recorder_bin", lambda: tmp_path / "absent")
+    monkeypatch.setattr(cli.sys, "platform", "linux")
+    monkeypatch.setattr(cli.sys, "argv", ["paraspeakrs", "record", "--no-transcribe"])
+
+    with pytest.raises(RuntimeError, match="cargo build --release --features recorder"):
+        cli._main()
+
+
+def test_record_on_macos_points_at_the_menu_bar_app(monkeypatch, tmp_path):
+    monkeypatch.setattr("paraspeakrs.config.default_recorder_bin", lambda: tmp_path / "absent")
+    monkeypatch.setattr(cli.sys, "platform", "darwin")
+    monkeypatch.setattr(cli.sys, "argv", ["paraspeakrs", "record"])
+
+    with pytest.raises(RuntimeError, match="install-recorder"):
+        cli._main()

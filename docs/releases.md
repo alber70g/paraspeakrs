@@ -84,7 +84,7 @@ included by accident. The script also greps the finished zip for those paths and
 warns if any appear.
 
 The Parakeet ASR model (~639 MB) is not bundled and must be fetched separately on
-the target; the speakrs diarization models (~315 MB) download themselves on first
+the target; the speakrs diarization models (about 216 MB with CoreML) download themselves on first
 run from the public `avencera/speakrs-models` repo, with no Hugging Face token.
 
 ## Cutting a release

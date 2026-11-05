@@ -25,9 +25,9 @@ uv tool install paraspeakrs --with 'paraspeakrs[tui]' --with 'paraspeakrs[mcp]'
 ```
 
 The first run asks which Parakeet ASR model you want (FP32, FP16 or INT8 — see
-[Model precision](#model-precision)) and downloads it, along with the speakrs diarization
-models (~315 MB) into `~/.local/share/paraspeakrs`. Neither
-needs an account or a token. `paraspeakrs fetch-models` pre-seeds the ASR model; see
+[Model precision](#model-precision)) and downloads it into `~/.local/share/paraspeakrs`;
+the speakrs diarization models (about 33 MB for `cpu`, 216 MB with CoreML on a Mac) go
+into the Hugging Face cache. Neither needs an account or a token. `paraspeakrs fetch-models` pre-seeds the ASR model; see
 [Running without model downloads](#running-without-model-downloads) if your network
 blocks the download.
 
@@ -130,8 +130,13 @@ no Rust toolchain needed:
 | Windows x64 | `cpu` | `cpu` |
 
 `cuda` needs an NVIDIA GPU (Turing or newer) and its driver; cuDNN and cuBLAS are loaded
-at run time when present. speakrs has no GPU backend on Windows. CPU diarization speed on
-real meetings has not been measured yet.
+at run time when present. speakrs has no GPU backend on Windows.
+
+`cpu` is the slow one. On GitHub's CI runners, diarizing 30 s of synthetic audio took
+14.0 s with `cpu` on Windows (4 cores) and 11.0 s on macOS 15 (3 cores), against 3.4 s
+with `coreml`, process start included. That is roughly 2 to 3 times faster than real
+time, so expect 20 to 30 minutes for an hour-long meeting on a comparable machine. Real
+meetings have not been timed.
 
 On other platforms (Linux aarch64, Intel Macs) the wheel does not exist, so `paraspeakrs`
 installs without it and you need one of:

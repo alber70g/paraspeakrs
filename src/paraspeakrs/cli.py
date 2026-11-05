@@ -283,6 +283,10 @@ def _record(args: argparse.Namespace, settings: Settings) -> None:
         )
     if args.list_devices:
         raise SystemExit(subprocess.run([str(binary), "--list-devices"]).returncode)
+    if not args.no_transcribe:
+        from .factory import settle_asr_choice
+
+        settings = settle_asr_choice(settings)
 
     recording = record_mod.record(
         [str(binary)],

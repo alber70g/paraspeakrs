@@ -93,6 +93,18 @@ def _settle_precision(settings: Settings) -> Settings:
     )
 
 
+def settle_asr_choice(settings: Settings) -> Settings:
+    """Ask the first-run precision question now, without downloading anything.
+
+    For `paraspeakrs record`, which must ask before it records: afterwards its
+    Enter-to-stop reader may still be waiting on stdin and would take the answer.
+    build_pipeline() later finds the answer stored and does not ask again.
+    """
+    if settings.asr_backend == "sherpa" and settings.sherpa_model_dir is not None:
+        settings = _settle_precision(_use_downloaded_model(settings))
+    return settings
+
+
 def build_pipeline(settings: Settings, *, need_asr: bool = True) -> TranscriptionPipeline:
     """``need_asr=False`` builds a pipeline that can diarize but must never
     transcribe: no ASR model is resolved, downloaded or validated, and the

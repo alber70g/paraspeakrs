@@ -47,6 +47,25 @@ Homebrew paths, OpenSSL, the VC++ runtime), and `scripts/smoke-test-speakrs.py`,
 installs the wheel, downloads the models and diarizes a file. The Linux job also records
 three seconds through PulseAudio virtual devices.
 
+### Beta releases
+
+A version such as `0.11.0b1` (PEP 440 pre-release) publishes like any other: bump both
+`pyproject.toml` files, `uv lock`, push the tag `v0.11.0b1`. pip and uv skip
+pre-releases unless asked for one by version, so `uv tool install paraspeakrs` keeps
+getting the last stable release.
+
+A tester has to pin **both** packages. `paraspeakrs` depends on
+`paraspeakrs-speakrs>=0.2.0`, and a resolver only picks a pre-release of a dependency
+when the requirement names one, so pinning `paraspeakrs` alone gets the beta with the
+last stable sidecar (on Linux and Windows, none at all):
+
+```sh
+uv tool install paraspeakrs==0.11.0b1 --with paraspeakrs-speakrs==0.11.0b1
+```
+
+Raising the floor to the beta instead would make `uv lock` unresolvable in the checkout
+until the beta is on PyPI, the bootstrap trap the floor exists to avoid.
+
 ### The first release with Linux and Windows wheels
 
 Until a `paraspeakrs-speakrs` release with Linux and Windows wheels is on PyPI, the

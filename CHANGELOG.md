@@ -6,6 +6,15 @@ All notable changes to `paraspeakrs` are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.11.0b1] — 2026-11-05
+
+A beta for testing on Linux and Windows. Installs only when asked for by version,
+for both packages; see [docs/beta-testing.md](docs/beta-testing.md):
+
+```sh
+uv tool install paraspeakrs==0.11.0b1 --with paraspeakrs-speakrs==0.11.0b1
+```
+
 ### Added
 
 - **Linux x86_64 and Windows x64 get the speakrs diarizer prebuilt.** The

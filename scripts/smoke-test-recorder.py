@@ -59,7 +59,8 @@ def main(argv: list[str]) -> int:
         info = json.loads(probe.stdout)
         stream, seconds = info["streams"][0], float(info["format"]["duration"])
         print(f"{recordings[0].name}: {stream}, {seconds:.2f} s")
-        if stream != {"codec_name": "aac", "channels": 2} or abs(seconds - 3) > 0.5:
+        # 0.25 s: AAC framing adds a few ms; seconds spent opening devices must not count.
+        if stream != {"codec_name": "aac", "channels": 2} or abs(seconds - 3) > 0.25:
             print("error: not a 3 s stereo AAC recording", file=sys.stderr)
             return 1
     return 0

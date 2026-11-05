@@ -18,7 +18,7 @@ use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, mpsc};
+use std::sync::{Arc, OnceLock, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -299,6 +299,34 @@ impl Aligner {
 
 // ----- capture ------------------------------------------------------------------
 
+/// The recording's clock. It starts when both streams are open and about to play,
+/// so the time spent opening devices is neither counted by --seconds nor written
+/// as leading silence; `stop` is where both tracks end.
+#[derive(Clone, Default)]
+struct Clock {
+    origin: Arc<OnceLock<Instant>>,
+    stop: Arc<OnceLock<Duration>>,
+}
+
+impl Clock {
+    fn start(&self) {
+        let _ = self.origin.set(Instant::now());
+    }
+
+    /// A stream that delivers before `start` (no host should) starts the clock.
+    fn origin(&self) -> Instant {
+        *self.origin.get_or_init(Instant::now)
+    }
+
+    fn elapsed(&self) -> Duration {
+        self.origin().elapsed()
+    }
+
+    fn stop(&self) -> Duration {
+        *self.stop.get_or_init(|| self.elapsed())
+    }
+}
+
 /// One callback's audio, downmixed to mono, with the moment its first frame was
 /// captured on the recording's clock.
 struct Chunk {
@@ -313,12 +341,13 @@ struct Track {
     sender: mpsc::Sender<Chunk>,
 }
 
+/// Opens the device and the track's file. The stream is paused until `play`.
 fn open_track(
     label: &'static str,
     device: &Device,
     loopback: bool,
     path: &Path,
-    started: Instant,
+    clock: &Clock,
 ) -> Result<Track, String> {
     let supported = if loopback {
         device.default_output_config()
@@ -348,12 +377,8 @@ fn open_track(
         dropped_seconds: 0.0,
         heard: false,
     };
-    let writer = spawn_writer(label, path, report, receiver, started)?;
-
-    let stream = build_stream(device, config, format, channels, sender.clone(), started, label)?;
-    stream
-        .play()
-        .map_err(|err| format!("{label}: cannot start {}: {err}", name_of(device)))?;
+    let writer = spawn_writer(label, path, report, receiver, clock.clone())?;
+    let stream = build_stream(device, config, format, channels, sender.clone(), clock.clone(), label)?;
     Ok(Track {
         stream,
         writer,
@@ -367,7 +392,7 @@ fn build_stream(
     format: SampleFormat,
     channels: u16,
     sender: mpsc::Sender<Chunk>,
-    started: Instant,
+    clock: Clock,
     label: &'static str,
 ) -> Result<cpal::Stream, String> {
     macro_rules! typed {
@@ -377,7 +402,7 @@ fn build_stream(
                 move |data: &[$t], info: &cpal::InputCallbackInfo| {
                     let samples = downmix(data, channels, |sample| cpal::Sample::to_sample::<f32>(sample));
                     let _ = sender.send(Chunk {
-                        start: capture_offset(info, started),
+                        start: capture_offset(info, clock.origin()),
                         samples,
                     });
                 },
@@ -425,7 +450,7 @@ fn spawn_writer(
     path: &Path,
     mut report: TrackReport,
     receiver: mpsc::Receiver<Chunk>,
-    started: Instant,
+    clock: Clock,
 ) -> Result<thread::JoinHandle<Result<TrackReport, String>>, String> {
     let spec = hound::WavSpec {
         channels: 1,
@@ -459,7 +484,7 @@ fn spawn_writer(
             if !report.heard && chunk.samples.iter().any(|sample| sample.abs() > SILENCE_PEAK) {
                 report.heard = true;
             }
-            if !report.heard && !warned && started.elapsed() > SILENCE_WARNING_AFTER {
+            if !report.heard && !warned && clock.elapsed() > SILENCE_WARNING_AFTER {
                 warned = true;
                 eprintln!(
                     "paraspeakrs-record: warning: no {label} audio after {} s (nothing playing, or the wrong device?)",
@@ -471,7 +496,7 @@ fn spawn_writer(
                 last_flush = Instant::now();
             }
         }
-        let tail = aligner.tail(started.elapsed());
+        let tail = aligner.tail(clock.stop());
         write(&mut wav, &[], tail)?;
         report.padded_seconds += tail as f64 / rate;
         wav.finalize().map_err(|err| err.to_string())?;
@@ -501,9 +526,16 @@ fn record(args: Args) -> Result<(), String> {
         });
     }
 
-    let started = Instant::now();
-    let mic_track = open_track("microphone", &mic, false, &args.mic_out, started)?;
-    let system_track = open_track("system", &system, cfg!(not(target_os = "linux")), &args.system_out, started)?;
+    let clock = Clock::default();
+    let mic_track = open_track("microphone", &mic, false, &args.mic_out, &clock)?;
+    let system_track = open_track("system", &system, cfg!(not(target_os = "linux")), &args.system_out, &clock)?;
+    clock.start();
+    for (track, device) in [(&mic_track, &mic), (&system_track, &system)] {
+        track
+            .stream
+            .play()
+            .map_err(|err| format!("cannot start {}: {err}", name_of(device)))?;
+    }
     eprintln!(
         "paraspeakrs-record: recording microphone: {} | system audio: {}",
         name_of(&mic),
@@ -511,10 +543,10 @@ fn record(args: Args) -> Result<(), String> {
     );
 
     let deadline = args.seconds.map(Duration::from_secs_f64);
-    while !stop.load(Ordering::SeqCst) && deadline.is_none_or(|limit| started.elapsed() < limit) {
-        thread::sleep(Duration::from_millis(50));
+    while !stop.load(Ordering::SeqCst) && deadline.is_none_or(|limit| clock.elapsed() < limit) {
+        thread::sleep(Duration::from_millis(10));
     }
-    let seconds = started.elapsed().as_secs_f64();
+    let seconds = clock.stop().as_secs_f64();
 
     let mut reports = Vec::new();
     for track in [mic_track, system_track] {
@@ -596,6 +628,18 @@ mod tests {
         assert_eq!(silent.tail(ms(5000)), 5000);
         assert_eq!(busy.tail(ms(5000)), 0);
         assert_eq!(silent.written, busy.written);
+    }
+
+    #[test]
+    fn the_clock_ignores_device_setup_and_stops_once() {
+        let clock = Clock::default();
+        thread::sleep(ms(40)); // opening devices: not part of the recording
+        clock.start();
+        assert!(clock.elapsed() < ms(30), "{:?}", clock.elapsed());
+        let stop = clock.stop();
+        thread::sleep(ms(20));
+        // Both writers pad to the same moment, however late each one gets there.
+        assert_eq!(clock.stop(), stop);
     }
 
     #[test]

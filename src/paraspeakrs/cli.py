@@ -83,6 +83,21 @@ def _main() -> None:
         help="codesign identity (default: a Developer ID or Apple Development certificate if present, else ad hoc)",
     )
     recorder_parser.add_argument("--no-open", action="store_true", help="install without launching the app")
+    record_parser = subparsers.add_parser(
+        "record",
+        help="Linux/Windows: record a meeting (microphone + system audio), then transcribe it",
+    )
+    _add_common(record_parser, env)
+    record_parser.add_argument(
+        "--out-dir", type=Path, default=None, help="where recordings go (default: ~/Documents/paraspeakrs-recordings)"
+    )
+    record_parser.add_argument("--seconds", type=float, default=None, help="stop after this many seconds")
+    record_parser.add_argument("--mic", default=None, metavar="NAME", help="input device whose name contains NAME")
+    record_parser.add_argument(
+        "--system", default=None, metavar="NAME", help="device to record system audio from (see --list-devices)"
+    )
+    record_parser.add_argument("--list-devices", action="store_true", help="list the audio devices and exit")
+    record_parser.add_argument("--no-transcribe", action="store_true", help="save the recording only")
     dictate_parser = subparsers.add_parser(
         "dictate", help="print the text of one short 16-bit WAV (the recorder's dictation shortcut)"
     )
@@ -215,6 +230,8 @@ def _main() -> None:
             print(workspace.transcript_text(summary.job_id), end="")
         else:
             print(workspace.store.load(summary.job_id).result.model_dump_json(indent=2))
+    elif args.command == "record":
+        _record(args, settings)
     elif args.command == "agent":
         from . import agent_dir, agent_text
 
@@ -242,6 +259,54 @@ def _main() -> None:
             label_probe_seconds=args.label_probe_seconds,
             transcribe_after_label=args.transcribe_after_label,
         )
+
+
+def _record(args: argparse.Namespace, settings: Settings) -> None:
+    """Record, merge, then transcribe the way the macOS app does: your mic on
+    the left channel is one speaker, everyone else is diarized on the right."""
+    import subprocess
+
+    from . import record as record_mod
+    from .config import RECORDER_BIN_NAME, default_recorder_bin
+
+    binary = default_recorder_bin()
+    if not binary.is_file():
+        if sys.platform == "darwin":
+            raise RuntimeError(
+                "on macOS, meetings are recorded by the menu-bar app: paraspeakrs install-recorder"
+            )
+        raise RuntimeError(
+            f"{RECORDER_BIN_NAME} not found: {binary}\n"
+            "It ships in the paraspeakrs-speakrs wheel for Linux x86_64 and Windows x64. "
+            "From a checkout:\n"
+            "  cd packages/speakrs-diar && cargo build --release --features recorder"
+        )
+    if args.list_devices:
+        raise SystemExit(subprocess.run([str(binary), "--list-devices"]).returncode)
+
+    recording = record_mod.record(
+        [str(binary)],
+        args.out_dir or record_mod.RECORDINGS_DIR,
+        seconds=args.seconds,
+        mic=args.mic,
+        system=args.system,
+    )
+    print(f"saved {recording.path} ({recording.seconds:.0f} s)", file=sys.stderr)
+    if args.no_transcribe:
+        return
+
+    later = f"paraspeakrs run --single-speaker-channel L --txt {recording.path}"
+    try:
+        workspace = LabelingWorkspace(
+            build_pipeline(settings),
+            ArtifactStore(settings.workspace_dir / "mcp-jobs"),
+        )
+        summary = workspace.transcribe(recording.path, single_speaker_channels=frozenset({"L"}))
+        transcript = recording.path.with_suffix(".txt")
+        transcript.write_text(workspace.transcript_text(summary.job_id), encoding="utf-8")
+    except (RuntimeError, ValueError) as exc:
+        raise RuntimeError(f"{exc}\nThe recording is saved; transcribe it later with:\n  {later}") from exc
+    print(f"transcript: {transcript}  (name the speakers in `paraspeakrs tui`)", file=sys.stderr)
 
 
 def _add_common(parser: argparse.ArgumentParser, env: Settings) -> None:

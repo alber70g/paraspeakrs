@@ -29,6 +29,7 @@ import wave
 from pathlib import Path
 
 from paraspeakrs.config import CHECKOUT_SPEAKRS_BIN, default_speakrs_bin
+from paraspeakrs.model_fetch import speakrs_models_cache_dir
 
 SAMPLE_RATE = 16_000
 SECONDS = 30
@@ -73,21 +74,32 @@ def main(modes: list[str]) -> int:
         audio = Path(tmp) / "smoke.wav"
         write_test_audio(audio)
         for mode in modes:
-            started = time.monotonic()
-            run = subprocess.run([str(binary), "--mode", mode, str(audio)], capture_output=True, text=True)
-            elapsed = time.monotonic() - started
-            if run.returncode != 0:
-                print(f"error: --mode {mode} exited {run.returncode}:\n{run.stderr}", file=sys.stderr)
-                return 1
-            payload = json.loads(run.stdout)
-            if payload.get("version") != 1:
-                print(f"error: --mode {mode} returned contract version {payload.get('version')!r}", file=sys.stderr)
-                return 1
-            print(
-                f"--mode {mode}: {len(payload['segments'])} segments, "
-                f"{len(payload['centroids'])} speakers, {elapsed:.1f} s including model download"
-            )
+            # The first run downloads the models; the second shows the speed.
+            for attempt in ("first run, with model download", "second run"):
+                started = time.monotonic()
+                run = subprocess.run([str(binary), "--mode", mode, str(audio)], capture_output=True, text=True)
+                elapsed = time.monotonic() - started
+                if run.returncode != 0:
+                    print(f"error: --mode {mode} exited {run.returncode}:\n{run.stderr}", file=sys.stderr)
+                    return 1
+                payload = json.loads(run.stdout)
+                if payload.get("version") != 1:
+                    print(f"error: --mode {mode} returned contract version {payload.get('version')!r}", file=sys.stderr)
+                    return 1
+                print(
+                    f"--mode {mode} ({attempt}): {len(payload['segments'])} segments, "
+                    f"{len(payload['centroids'])} speakers, {elapsed:.1f} s "
+                    f"for {SECONDS} s of audio ({SECONDS / elapsed:.0f}x real time, process start included)"
+                )
+    print(f"model cache: {_cache_size_mb():.0f} MB in {speakrs_models_cache_dir()}")
     return 0
+
+
+def _cache_size_mb() -> float:
+    """What the modes above downloaded; blobs only, since snapshots link to them."""
+    blobs = speakrs_models_cache_dir() / "blobs"
+    files = [path for path in blobs.rglob("*") if path.is_file()] if blobs.is_dir() else []
+    return sum(path.stat().st_size for path in files) / 1e6
 
 
 if __name__ == "__main__":

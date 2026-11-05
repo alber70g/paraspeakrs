@@ -1,8 +1,10 @@
 name: Build speakrs-diar wheels
 
-# The diarization sidecar, one wheel per platform. Called by ci.yml on every push
-# and by publish.yml on a release tag, so a release ships exactly what CI built
-# and checked.
+# The native sidecars, one paraspeakrs-speakrs wheel per platform: speakrs-diar
+# (diarization) everywhere, and paraspeakrs-record (meeting recording) on Linux
+# and Windows; macOS records with the Swift app instead. Called by ci.yml on
+# every push and by publish.yml on a release tag, so a release ships exactly
+# what CI built and checked.
 on:
   workflow_call:
 
@@ -26,14 +28,20 @@ jobs:
           - name: linux-x86_64
             os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            # Loads the driver, cuDNN and cuBLAS at run time; builds without a CUDA
-            # toolkit, and a machine without NVIDIA still gets the cpu mode.
-            features: cuda
+            # cuda loads the driver, cuDNN and cuBLAS at run time; it builds without
+            # a CUDA toolkit, and a machine without NVIDIA still gets the cpu mode.
+            features: cuda,recorder
             smoke-modes: cpu
+            # The recorder links the system's ALSA (libasound.so.2), which must
+            # not be vendored: a copy from the build container would look for its
+            # plugins in that distribution's paths. check-speakrs-wheel.py checks
+            # the linking instead.
+            maturin-args: --auditwheel skip
+            record: true
           - name: windows-x64
             os: windows-latest
             target: x86_64-pc-windows-msvc
-            features: ""
+            features: recorder
             smoke-modes: cpu
             # Link the C runtime into the binary. Without this it needs
             # vcruntime140.dll, which a fresh Windows install does not have.
@@ -46,6 +54,10 @@ jobs:
       - uses: astral-sh/setup-uv@v8.3.2
       - uses: dtolnay/rust-toolchain@stable
 
+      - name: ALSA headers (the recorder's cpal needs them to build)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -q && sudo apt-get install -y -q libasound2-dev
+
       - name: Unit tests
         working-directory: packages/speakrs-diar
         shell: bash
@@ -57,18 +69,22 @@ jobs:
           working-directory: packages/speakrs-diar
           target: ${{ matrix.target }}
           # Linux only (ignored elsewhere): builds inside the manylinux_2_28
-          # container, so the binary runs on any glibc 2.28+ distribution.
+          # container, so the binaries run on any glibc 2.28+ distribution.
           manylinux: "2_28"
+          before-script-linux: yum install -y alsa-lib-devel
           maturin-version: v1.16.0
           rust-toolchain: stable
-          args: --release --out dist ${{ matrix.features && format('--features {0}', matrix.features) || '' }}
+          args: >-
+            --release --out dist ${{ matrix.maturin-args }}
+            ${{ matrix.features && format('--features {0}', matrix.features) || '' }}
 
       - name: Fail unless the wheel is self-contained
         shell: bash
         run: uv run --no-project --with 'lief==1.0.0' python scripts/check-speakrs-wheel.py packages/speakrs-diar/dist/*.whl
 
       # Installs the wheel the way a user gets it, then checks that paraspeakrs
-      # finds the binary and that it downloads its models and diarizes a file.
+      # finds the binaries, that speakrs-diar downloads its models and diarizes a
+      # file, and that paraspeakrs-record starts.
       - name: Smoke test
         shell: bash
         run: |
@@ -77,6 +93,28 @@ jobs:
           python=smoke/bin/python
           [ -e "$python" ] || python=smoke/Scripts/python.exe
           "$python" scripts/smoke-test-speakrs.py ${{ matrix.smoke-modes }}
+          if [ "${{ contains(matrix.features, 'recorder') }}" = "true" ]; then
+            "$python" scripts/smoke-test-recorder.py
+          fi
+
+      # Linux runners have no sound devices, so give them two: PulseAudio null
+      # sinks standing in for a microphone and for the speakers, each playing a
+      # tone, as PipeWire's pulse server would offer real ones.
+      - name: Record through PulseAudio
+        if: matrix.record
+        run: |
+          sudo apt-get install -y -q pulseaudio pulseaudio-utils ffmpeg
+          pulseaudio -D -n --exit-idle-time=-1 \
+            -L module-native-protocol-unix \
+            -L "module-null-sink sink_name=speakers" \
+            -L "module-null-sink sink_name=micsink"
+          pactl set-default-sink speakers
+          pactl set-default-source micsink.monitor
+          ffmpeg -v error -f lavfi -i "sine=frequency=440:duration=10" -ac 2 mic-tone.wav
+          ffmpeg -v error -f lavfi -i "sine=frequency=880:duration=10" -ac 2 system-tone.wav
+          paplay --device=micsink mic-tone.wav &
+          paplay --device=speakers system-tone.wav &
+          smoke/bin/python scripts/smoke-test-recorder.py --record
 
       - uses: actions/upload-artifact@v4
         with:

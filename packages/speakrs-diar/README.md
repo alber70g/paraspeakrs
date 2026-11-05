@@ -1,18 +1,24 @@
 # paraspeakrs-speakrs
 
-The `speakrs-diar` sidecar binary for [paraspeakrs][repo], packaged as a platform wheel.
+The native sidecar binaries for [paraspeakrs][repo], packaged as platform wheels.
 
 This distribution contains no Python code. It exists so that `uv tool install paraspeakrs`
-can provide a working default diarization backend without a Rust toolchain, Homebrew, or a
-source build. The binary reads a WAV file and emits diarization segments as JSON; it is
-invoked by `paraspeakrs` as a subprocess.
+works without a Rust toolchain or a source build. `paraspeakrs` runs each binary as a
+subprocess:
 
-Built for macOS arm64 with `--features coreml,blas-static`, so it carries its own OpenBLAS
-and depends only on macOS system frameworks.
+| Binary | Does | Wheels |
+|---|---|---|
+| `speakrs-diar` | reads a WAV file and prints diarization segments and speaker embeddings as JSON | macOS arm64, Linux x86_64, Windows x64 |
+| `paraspeakrs-record` | records the microphone and the system audio as two time-aligned tracks, for `paraspeakrs record` | Linux x86_64, Windows x64 |
 
-On its first run it downloads the speakrs diarization models (~315 MB) from the public
-`avencera/speakrs-models` repository. No Hugging Face token is required. Set
+`speakrs-diar` is built with speakrs' native CPU backend everywhere, plus CoreML on macOS
+(macOS 15 or later) and CUDA on Linux. It links no BLAS, no ONNX Runtime and no OpenSSL. On
+its first run it downloads the speakrs models for the chosen mode from the public
+`avencera/speakrs-models` repository; no Hugging Face token is required. Set
 `SPEAKRS_MODELS_DIR` to use a local copy instead.
+
+`paraspeakrs-record` needs PulseAudio or PipeWire (with `pipewire-pulse`, the default on
+current desktops) on Linux, and links the system's ALSA library (`libasound.so.2`).
 
 Install `paraspeakrs` rather than this package directly.
 

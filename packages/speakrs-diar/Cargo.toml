@@ -4,11 +4,19 @@ version = "0.1.0"
 edition = "2024"
 # speakrs 0.7 needs 1.96.
 rust-version = "1.96"
-description = "Sidecar binary that runs speakrs diarization and emits JSON for the Python pipeline"
+description = "Sidecar binaries for paraspeakrs: speakrs diarization (speakrs-diar) and a two-track meeting recorder (paraspeakrs-record)"
 
 [[bin]]
 name = "speakrs-diar"
 path = "src/main.rs"
+
+# The Linux and Windows meeting recorder (macOS has the Swift app). Built only
+# with the `recorder` feature, so the macOS wheel and plain `cargo build` skip
+# cpal and, on Linux, the ALSA headers it needs.
+[[bin]]
+name = "paraspeakrs-record"
+path = "src/bin/paraspeakrs-record.rs"
+required-features = ["recorder"]
 
 [dependencies]
 # Without speakrs' `online` feature: it downloads over native-tls, which links the
@@ -22,6 +30,10 @@ hound = "3.5"
 ndarray = "0.17.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# `pulseaudio` is cpal's pure-Rust PulseAudio client: the Linux host that lists
+# monitor sources, and that PipeWire desktops serve through pipewire-pulse.
+cpal = { version = "0.18", optional = true, features = ["pulseaudio"] }
+ctrlc = { version = "3", optional = true }
 
 # Each backend is a speakrs feature. `cpu` is native Rust with no runtime
 # dependency and works everywhere; the wheels add the platform's accelerator:
@@ -34,6 +46,7 @@ default = ["cpu"]
 cpu = ["speakrs/cpu"]
 coreml = ["speakrs/coreml"]
 cuda = ["speakrs/cuda"]
+recorder = ["dep:cpal", "dep:ctrlc"]
 
 [profile.release]
 opt-level = 3

@@ -9,7 +9,10 @@ so each binary may only link what every target system already has:
   /usr/local exists only on the build machine.
 - Linux (ELF): the glibc core libraries. Not OpenSSL: its soname differs between
   distributions, so a binary linked against one distribution's libssl fails to
-  start on the next. The sidecar downloads over rustls for that reason.
+  start on the next. The sidecar downloads over rustls for that reason. The one
+  exception is ALSA (libasound.so.2) for paraspeakrs-record: cpal always links it,
+  its soname has not changed in two decades, and every desktop has it. It must be
+  the system's copy, so the wheel must not vendor it either.
 - Windows (PE): Windows' own DLLs. Not the Visual C++ runtime (vcruntime140.dll),
   which many machines lack; the build links the C runtime statically.
 
@@ -40,6 +43,8 @@ ELF_ALLOWED = {
     "ld-linux-x86-64.so.2",
     "ld-linux-aarch64.so.1",
 }
+# Allowed for one binary only, by file name.
+ELF_ALLOWED_FOR = {"paraspeakrs-record": {"libasound.so.2"}}
 # The Visual C++ redistributable, which is not part of Windows.
 PE_DENIED_PREFIXES = ("vcruntime", "msvcp", "concrt", "vccorlib", "ucrtbased")
 
@@ -65,11 +70,12 @@ def linked_libraries(path: Path) -> tuple[str, list[str]] | None:
     return None
 
 
-def problems(kind: str, libs: list[str]) -> list[str]:
+def problems(kind: str, libs: list[str], name: str) -> list[str]:
     if kind == "Mach-O":
         return [lib for lib in libs if not lib.startswith(MACHO_ALLOWED_PREFIXES)]
     if kind == "ELF":
-        return [lib for lib in libs if lib not in ELF_ALLOWED]
+        allowed = ELF_ALLOWED | ELF_ALLOWED_FOR.get(name, set())
+        return [lib for lib in libs if lib not in allowed]
     bad = [lib for lib in libs if lib.lower().startswith(PE_DENIED_PREFIXES)]
     # On a Windows runner, also require each DLL to be one Windows itself ships.
     system32 = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32"
@@ -108,7 +114,7 @@ def main(argv: list[str]) -> int:
             kind, libs = found
             name = str(path.relative_to(root))
             checked.append(f"{name} ({kind})")
-            leaks += [f"{name}: {lib}" for lib in problems(kind, libs)]
+            leaks += [f"{name}: {lib}" for lib in problems(kind, libs, path.name)]
 
         if not checked:
             print(f"error: no native binaries in {wheel.name}; this check would pass vacuously", file=sys.stderr)

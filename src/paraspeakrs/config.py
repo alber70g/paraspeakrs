@@ -37,6 +37,8 @@ SPEAKRS_BIN_NAME = speakrs_bin_name()
 # paraspeakrs-speakrs wheel instead. Kept last in the search order so the dev workflow
 # keeps working without an env var.
 CHECKOUT_SPEAKRS_BIN = Path("packages/speakrs-diar/target/release") / SPEAKRS_BIN_NAME
+RECORDER_BIN_NAME = "paraspeakrs-record.exe" if sys.platform == "win32" else "paraspeakrs-record"
+CHECKOUT_RECORDER_BIN = Path("packages/speakrs-diar/target/release") / RECORDER_BIN_NAME
 # The platforms the paraspeakrs-speakrs wheel is built for, as an error message
 # names them. Keep in step with the dependency marker in pyproject.toml.
 SPEAKRS_WHEEL_PLATFORMS = "macOS arm64, Linux x86_64 and Windows x64"
@@ -119,17 +121,33 @@ def default_speakrs_bin() -> Path:
     development. Returns the checkout path when nothing exists so the error message
     in validate_runtime() still has something concrete to name.
     """
+    return _find_sidecar(SPEAKRS_BIN_NAME, CHECKOUT_SPEAKRS_BIN)
+
+
+def default_recorder_bin() -> Path:
+    """Locate the paraspeakrs-record sidecar (Linux and Windows), the same way.
+
+    PARASPEAKRS_RECORD_BIN overrides the search. Ships in the same wheel as
+    speakrs-diar.
+    """
+    override = os.getenv("PARASPEAKRS_RECORD_BIN")
+    if override:
+        return Path(override).expanduser()
+    return _find_sidecar(RECORDER_BIN_NAME, CHECKOUT_RECORDER_BIN)
+
+
+def _find_sidecar(name: str, checkout: Path) -> Path:
     # sysconfig, not Path(sys.executable).parent: in a venv the interpreter is a
     # symlink into the real Python installation, and resolving it lands outside the
     # venv, where the wheel's binary is not.
     for scripts in (sysconfig.get_path("scripts"), str(Path(sys.executable).parent)):
-        bundled = Path(scripts) / SPEAKRS_BIN_NAME
+        bundled = Path(scripts) / name
         if bundled.is_file():
             return bundled
-    found = shutil.which(SPEAKRS_BIN_NAME)
+    found = shutil.which(name)
     if found:
         return Path(found)
-    return CHECKOUT_SPEAKRS_BIN
+    return checkout
 
 
 def legacy_jobs_dir() -> Path | None:

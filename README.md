@@ -4,15 +4,19 @@ Speaker-aware transcription for long meeting recordings: **Para**keet for ASR,
 **speakrs** for diarization.
 
 ```sh
-uv tool install paraspeakrs          # the tool, plus the diarizer binary on macOS arm64
-brew install ffmpeg                  # ffmpeg and ffprobe must be on PATH
+uv tool install paraspeakrs          # the tool, plus its native binaries (see below)
+brew install ffmpeg                  # ffmpeg and ffprobe on PATH; Linux: apt/dnf; Windows: winget
 
 paraspeakrs run --txt meeting.m4a    # transcribe; models download themselves on first run
 paraspeakrs tui                      # the terminal UI (add --with 'paraspeakrs[tui]')
 paraspeakrs mcp                      # the MCP server (add --with 'paraspeakrs[mcp]')
 paraspeakrs agent help               # the file-based flow for coding agents, no MCP needed
 paraspeakrs install-recorder         # macOS: a menu-bar app that records meetings for paraspeakrs
+paraspeakrs record                   # Linux, Windows: record a meeting from the terminal
 ```
+
+Prebuilt for **macOS arm64**, **Linux x86_64** and **Windows x64**. Elsewhere the Python
+package still installs; see [The diarizer binary](#the-diarizer-binary).
 
 To install with the optional interfaces in one go:
 
@@ -43,8 +47,9 @@ working directory, so `paraspeakrs` behaves the same wherever it is launched fro
 ## Prerequisites
 
 - **FFmpeg, with `ffprobe`, on `PATH`** — the only thing `uv tool install` cannot
-  provide for you. Every audio path shells out to it. `brew install ffmpeg`, or static
-  builds from <https://evermeet.cx/ffmpeg/>.
+  provide for you. Every audio path shells out to it. macOS: `brew install ffmpeg`, or
+  static builds from <https://evermeet.cx/ffmpeg/>. Linux: `sudo apt install ffmpeg` or
+  `sudo dnf install ffmpeg`. Windows: `winget install Gyan.FFmpeg`.
 - Python 3.11 or 3.12, which `uv` will install and manage on its own.
 
 The ASR model is downloaded on first use into
@@ -114,21 +119,28 @@ that spoken Dutch is full of.
 
 ### The diarizer binary
 
-The default `speakrs` backend runs as a sidecar binary. The
-`paraspeakrs-speakrs` wheel ships it prebuilt for **macOS arm64**, and
-`uv tool install paraspeakrs` pulls it in automatically there — no Rust toolchain and no
-Homebrew OpenBLAS.
+The default `speakrs` backend runs as a sidecar binary. The `paraspeakrs-speakrs`
+wheel ships it prebuilt, and `uv tool install paraspeakrs` pulls it in automatically —
+no Rust toolchain needed:
 
-On other platforms that wheel does not exist, so `paraspeakrs` installs without it and
-you need one of:
+| Platform | Diarization modes | Default |
+|---|---|---|
+| macOS arm64 | `cpu`, `coreml`, `coreml-fast` | `coreml` on macOS 15 and later, `cpu` before |
+| Linux x86_64 (glibc 2.28+) | `cpu`, `cuda`, `cuda-fast` | `cpu` |
+| Windows x64 | `cpu` | `cpu` |
+
+`cuda` needs an NVIDIA GPU (Turing or newer) and its driver; cuDNN and cuBLAS are loaded
+at run time when present. speakrs has no GPU backend on Windows. CPU diarization speed on
+real meetings has not been measured yet.
+
+On other platforms (Linux aarch64, Intel Macs) the wheel does not exist, so `paraspeakrs`
+installs without it and you need one of:
 
 - `--diar-backend senko` (install with `--with 'paraspeakrs[senko]'`; pulls torch, ~1.2 GB)
 - your own build, with `SPEAKRS_BIN` pointing at it:
   ```sh
-  brew install openblas
   cd packages/speakrs-diar
-  PKG_CONFIG_PATH="/opt/homebrew/opt/openblas/lib/pkgconfig" \
-    cargo build --release --features coreml     # NVIDIA: --features cuda
+  cargo build --release                       # macOS: --features coreml; NVIDIA: --features cuda
   ```
 
 `paraspeakrs` finds the binary next to its own interpreter first, then on `PATH`, then in
@@ -213,21 +225,21 @@ finer turns than Senko: on a 3059 s four-person recording Senko reported 3 speak
 with a single 347 s unbroken block, while speakrs reported 4 speakers with a 43 s
 longest block — and ran faster (6.1 s vs 8.3 s).
 
-speakrs is a Rust library with no Python bindings, so it runs as a sidecar binary
-that must be built once:
+speakrs runs as a sidecar binary, so that a crash in it cannot take the worker down
+and so that it can return the per-speaker embeddings the speaker cache needs, which
+speakrs' own Python bindings do not. The wheels ship it (see
+[The diarizer binary](#the-diarizer-binary)); to build it yourself:
 
 ```sh
-brew install openblas                       # macOS; Linux: your distro's openblas-dev
 cd packages/speakrs-diar
-PKG_CONFIG_PATH="/opt/homebrew/opt/openblas/lib/pkgconfig" \
-  cargo build --release --features coreml   # NVIDIA: --features cuda; otherwise omit
+cargo build --release                       # macOS: --features coreml; NVIDIA: --features cuda
 ```
 
 Build with the feature matching the `--speakrs-mode` you intend to use; a binary
 built without `coreml` rejects `--speakrs-mode coreml` and lists what it supports.
 
 - `--speakrs-bin` / `SPEAKRS_BIN` — defaults to `packages/speakrs-diar/target/release/speakrs-diar`
-- `--speakrs-mode` / `SPEAKRS_MODE` — `cpu`, `coreml` (default on macOS), `coreml-fast`, `cuda`, `cuda-fast`
+- `--speakrs-mode` / `SPEAKRS_MODE` — `cpu`, `coreml` (default on macOS 15 and later), `coreml-fast`, `cuda`, `cuda-fast`
 - `--speakrs-models-dir` / `SPEAKRS_MODELS_DIR` — load models from a directory instead of
   downloading them from the public `avencera/speakrs-models` repo on first use (no HF token needed)
 
@@ -958,6 +970,40 @@ speaker and everyone else is an `R_` speaker. The job shows up in `paraspeakrs t
 
 Details, file layout and crash recovery: [packages/recorder-macos/README.md](packages/recorder-macos/README.md).
 
+## Meeting recorder (Linux and Windows)
+
+`paraspeakrs record` records your microphone and all system audio (the other
+participants) from the terminal, until you press Enter or Ctrl+C:
+
+```sh
+paraspeakrs record                   # record, then transcribe
+paraspeakrs record --seconds 3600    # stop by itself after an hour
+paraspeakrs record --no-transcribe   # only save the recording
+paraspeakrs record --list-devices    # then --mic NAME / --system NAME to pick others
+```
+
+It saves the same file the macOS app does, a stereo `.m4a` in
+`~/Documents/paraspeakrs-recordings/` named like `2026-11-04_1430.m4a`, with the
+microphone on the left channel and the system audio on the right. Then it runs the
+equivalent of `paraspeakrs run --single-speaker-channel L` and writes the transcript
+next to it as `2026-11-04_1430.txt`: your voice is one `L_` speaker, everyone else is
+diarized as `R_` speakers. Name them in `paraspeakrs tui`.
+
+- **Linux:** system audio is the monitor of the default output, recorded through
+  PulseAudio. Desktops on PipeWire serve that through `pipewire-pulse`, which Ubuntu,
+  Fedora, Debian and Arch install by default. No permission prompt. The recorder links
+  the system's ALSA library (`libasound.so.2`), present on any desktop.
+- **Windows:** system audio is WASAPI loopback of the default output device. No
+  permission prompt.
+- The two tracks are kept on one clock: a track that falls more than 50 ms behind (a
+  loopback delivers nothing while nothing plays) is padded with silence, one that runs
+  ahead drops frames. After 30 s of silence on a track, the recorder warns.
+- While recording, the tracks are written as `<name>.mic.wav` and `<name>.system.wav`.
+  They are deleted once the `.m4a` is written; if the merge fails, they stay.
+- Loopback records everything the output plays, including notification sounds.
+- Not tested on a physical Linux or Windows machine yet: CI records through PulseAudio
+  virtual devices on Linux, and Windows runners have no sound devices.
+
 ## Stereo handling
 
 If the input audio has two channels the pipeline splits it into two mono streams,
@@ -1025,8 +1071,8 @@ people:
   [`ort`](https://github.com/pykeio/ort) crate — inference for both stacks.
 - [FFmpeg](https://ffmpeg.org/) — every audio normalization, channel split and
   chunk export.
-- [OpenBLAS](https://github.com/OpenMathLib/OpenBLAS) — the linear algebra behind
-  speakrs' PLDA and VBx clustering.
+- [cpal](https://github.com/RustAudio/cpal) — microphone and system-audio capture
+  for `paraspeakrs record` on Linux and Windows.
 - [FastAPI](https://github.com/fastapi/fastapi), [Textual](https://github.com/Textualize/textual),
   and the [Model Context Protocol](https://github.com/modelcontextprotocol) SDK —
   the service, terminal UI and MCP surfaces.

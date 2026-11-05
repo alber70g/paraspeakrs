@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import platform
 import shutil
 import sys
 import sysconfig
@@ -286,9 +287,26 @@ class Settings:
 
 
 def default_speakrs_mode() -> str:
-    """CoreML is the fastest speakrs backend on Apple Silicon and the one the
-    documented build enables; everywhere else fall back to portable CPU."""
-    return "coreml" if sys.platform == "darwin" else "cpu"
+    """CoreML is the fastest speakrs backend on Apple Silicon; everywhere else,
+    and on macOS before 15, fall back to portable CPU.
+
+    speakrs 0.7's compiled CoreML models do not load on macOS 14 ("compiler
+    major version for compiled model is 9.0.0 and is more recent than this
+    framework major version 8.0.0"), measured on GitHub's macos-14 runner; they
+    load on macos-15. SPEAKRS_MODE=coreml still forces it.
+    """
+    if sys.platform != "darwin":
+        return "cpu"
+    return "coreml" if _macos_major() >= 15 else "cpu"
+
+
+def _macos_major() -> int:
+    release = platform.mac_ver()[0]
+    try:
+        return int(release.split(".")[0])
+    except ValueError:
+        # Unknown: assume a current macOS, which is what CoreML was chosen for.
+        return 99
 
 
 def _literal(name: str, value: str, allowed: tuple[str, ...]):

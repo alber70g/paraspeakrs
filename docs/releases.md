@@ -7,7 +7,7 @@ Two distributions ship from this repository:
 | | |
 |---|---|
 | `paraspeakrs` | the Python package — one wheel for every platform |
-| `paraspeakrs-speakrs` | the Rust diarization sidecar — macOS arm64 only |
+| `paraspeakrs-speakrs` | the Rust sidecars — `speakrs-diar` for macOS arm64, Linux x86_64 and Windows x64; `paraspeakrs-record` for Linux x86_64 and Windows x64 |
 
 `paraspeakrs` depends on `paraspeakrs-speakrs` with a **floor** (`>=`), not an exact
 pin. An `==` pin on the version being released makes `uv lock` unresolvable inside the
@@ -31,11 +31,36 @@ To cut a release:
 Publishing uses PyPI trusted publishing (OIDC), so there is no API token to rotate. The
 `pypi` GitHub environment must be configured as a trusted publisher for both project names.
 
-The sidecar is built on `macos-14` with `--features coreml,blas-static` and
-`--auditwheel=repair`. `blas-static` compiles OpenBLAS into the binary, and the repair step
-vendors gfortran's runtime (`libgfortran`, `libquadmath`, `libgcc_s`) into the wheel — the
-build machine's Homebrew gcc is not on the target machine. The workflow fails the build if
-`otool -L` still shows any `/opt/homebrew` or `/usr/local` reference.
+The sidecar wheels are built by `.github/workflows/build-speakrs.yml`, which `ci.yml`
+runs on every push and `publish.yml` runs for the tag, so a release ships what CI already
+built:
+
+| Wheel | Runner | Features | Notes |
+|---|---|---|---|
+| macOS arm64 | `macos-15` | `coreml` | CoreML models need macOS 15; the smoke test runs both modes |
+| Linux x86_64 | `ubuntu-latest`, inside `manylinux_2_28` | `cuda,recorder` | `--auditwheel skip`, so the system ALSA is linked, not vendored |
+| Windows x64 | `windows-latest` | `recorder` | static C runtime (`+crt-static`), so no `vcruntime140.dll` |
+
+Every wheel gets the `cpu` backend (the crate default). Each job runs the Rust tests,
+`scripts/check-speakrs-wheel.py` (fails on any library the target machine may lack:
+Homebrew paths, OpenSSL, the VC++ runtime), and `scripts/smoke-test-speakrs.py`, which
+installs the wheel, downloads the models and diarizes a file. The Linux job also records
+three seconds through PulseAudio virtual devices.
+
+### The first release with Linux and Windows wheels
+
+Until a `paraspeakrs-speakrs` release with Linux and Windows wheels is on PyPI, the
+lockfile names one with only a macOS wheel, so `uv sync` on Linux or Windows cannot
+install it. CI therefore syncs with `--no-install-package paraspeakrs-speakrs` (the tests
+mock the sidecar). After that release:
+
+1. `uv lock --upgrade-package paraspeakrs-speakrs`, so the lockfile names it.
+2. Add `required-environments` under `[tool.uv]` in `pyproject.toml` for the three
+   platforms, so `uv lock` can never again settle on a version without their wheels.
+3. Raise the `paraspeakrs-speakrs>=` floor to that version: older ones lack the new
+   platforms and still link OpenBLAS.
+4. Drop `--no-install-package paraspeakrs-speakrs` from `ci.yml` and `publish.yml` if the
+   tests should run against the real binary.
 
 ## Shipping a zip instead
 
@@ -100,28 +125,20 @@ cat SHIPPING.md    # then follow it
 `SHIPPING.md` covers uv, ffmpeg, the ASR model, and pointing `SPEAKRS_BIN` at the
 bundled binary. If Gatekeeper blocks the binary because the machine's MDM policy
 requires notarized executables, it also documents rebuilding from source instead —
-that path needs `brew install openblas` and a Rust toolchain.
+that path needs a Rust toolchain.
 
 ## Why the binary is bundled rather than rebuilt
 
-`speakrs-diar` links OpenBLAS. Built normally it points at
-`/opt/homebrew/opt/openblas/lib/libopenblas.0.dylib` and will not start on a machine
-without Homebrew. The build script therefore copies the full dylib closure
-(`libopenblas`, `libgfortran`, `libomp`, `libquadmath`, `libgcc_s`) into `bin/lib/`
-and rewrites the load paths to `@executable_path/lib`.
+Since speakrs 0.7 (paraspeakrs-speakrs after 0.10.0), `speakrs-diar` links no OpenBLAS,
+no ONNX Runtime and no OpenSSL; it depends only on macOS system frameworks. The zip still
+carries the binary so the target machine needs no Rust toolchain, and the script still
+runs `dylibbundler`, which now finds nothing to copy.
 
-Two traps that are worth knowing if this ever needs redoing by hand:
-
-- Bundling only `libopenblas` looks like it works, because `libgfortran`, `libomp`
-  and `libquadmath` still resolve from Homebrew **on the build machine**. Check the
-  whole closure, not just the direct dependency.
-- `dylibbundler` can append the same `LC_RPATH` several times, and dyld refuses to
-  load a binary with duplicate rpaths (`duplicate LC_RPATH '@executable_path/lib/'`).
-  The script collapses them and re-signs.
-
-`otool -L` output is not proof either way; the script verifies by actually running
-the binary, and `DYLD_PRINT_LIBRARIES=1` shows which dylibs really get loaded.
-
-Statically linking OpenBLAS instead (the `blas-static` feature on
-`packages/speakrs-diar`) would avoid all of this, but its source build currently
-fails against modern gcc.
+Earlier builds linked Homebrew's OpenBLAS and needed its whole dylib closure
+(`libopenblas`, `libgfortran`, `libomp`, `libquadmath`, `libgcc_s`) bundled into
+`bin/lib/` with load paths rewritten to `@executable_path/lib`. If a dependency like that
+ever returns: check the whole closure, not just the direct dependency, because the rest
+still resolves from Homebrew on the build machine; and `dylibbundler` can append the same
+`LC_RPATH` several times, which dyld refuses to load (the script collapses them and
+re-signs). `otool -L` output is not proof either way; the script verifies by actually
+running the binary.

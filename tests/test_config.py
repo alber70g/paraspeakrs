@@ -182,3 +182,24 @@ def test_an_explicit_workspace_is_never_migrated(monkeypatch, tmp_path) -> None:
     Settings.from_env()
 
     assert old.is_dir()
+
+
+@pytest.mark.parametrize(
+    ("system", "release", "mode"),
+    [
+        ("darwin", "26.1", "coreml"),
+        ("darwin", "15.7.1", "coreml"),
+        # speakrs 0.7's CoreML models do not load before macOS 15.
+        ("darwin", "14.6.1", "cpu"),
+        ("darwin", "", "coreml"),
+        ("linux", "", "cpu"),
+        ("win32", "", "cpu"),
+    ],
+)
+def test_speakrs_mode_defaults_to_coreml_only_where_it_loads(monkeypatch, system, release, mode):
+    from paraspeakrs import config
+
+    monkeypatch.setattr(sys, "platform", system)
+    monkeypatch.setattr(config.platform, "mac_ver", lambda: (release, ("", "", ""), ""))
+    assert config.default_speakrs_mode() == mode
+

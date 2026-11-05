@@ -6,6 +6,43 @@ All notable changes to `paraspeakrs` are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Linux x86_64 and Windows x64 get the speakrs diarizer prebuilt.** The
+  `paraspeakrs-speakrs` wheel now exists for both, next to macOS arm64, so
+  `uv tool install paraspeakrs` diarizes there without a Rust toolchain. Linux gets
+  the `cpu` and `cuda` modes, Windows `cpu`. On Windows the binary is
+  `speakrs-diar.exe` and needs no Visual C++ runtime.
+- **`paraspeakrs record`: meeting recording on Linux and Windows.** It records the
+  microphone and the system audio, saves the same stereo `.m4a` as the macOS app
+  (microphone left, system audio right, in `~/Documents/paraspeakrs-recordings/`),
+  transcribes it with `--single-speaker-channel L` and writes `<name>.txt` next to it.
+  Enter or Ctrl+C stops; `--seconds`, `--mic`, `--system`, `--list-devices` and
+  `--no-transcribe` are the options. System audio is the default output's monitor
+  through PulseAudio or PipeWire on Linux, and WASAPI loopback on Windows. Not yet
+  tried on a physical Linux or Windows machine.
+- **CI on every push**: the tests on Linux, macOS and Windows, and each sidecar wheel
+  built, checked for libraries the target machine may lack, installed, and run on a
+  file.
+
+### Changed
+
+- **The diarizer moves to speakrs 0.7.** Its native CPU backend replaces ONNX
+  Runtime and OpenBLAS, so the binary links nothing outside the operating system.
+  Diarization results can differ slightly from 0.10.0: speakrs 0.6 changed chunk
+  stitching and the segmentation step. The `cpu` and `cuda` modes load new
+  `.safetensors` model files, downloaded once into the same Hugging Face cache; a
+  `SPEAKRS_MODELS_DIR` copy must be refreshed with the new file set.
+- **CoreML is the default diarization mode only on macOS 15 and later.** speakrs
+  0.7's CoreML models do not load on macOS 14, which now defaults to `cpu`.
+  `SPEAKRS_MODE=coreml` still forces it.
+
+### Fixed
+
+- **Windows: naming a speaker in the TUI could fail with "Access is denied"** when
+  the job list was being read at the same moment. Saves now retry for up to 0.5 s.
+- The diarizer's JSON is read as UTF-8 rather than the Windows code page.
+
 ## [0.10.0] — 2026-11-04
 
 ### Added

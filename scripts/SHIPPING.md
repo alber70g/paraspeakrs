@@ -60,8 +60,8 @@ Or point `PARAKEET_SHERPA_MODEL_DIR` / `--sherpa-model-dir` at wherever you put 
 
 ## 4. Point the service at the bundled diarizer
 
-The binary in `bin/` is self-contained — it carries its own OpenBLAS and needs no
-Homebrew. Its diarization models (~315 MB) download from the public
+The binary in `bin/` is self-contained: it depends only on macOS system frameworks
+and needs no Homebrew. Its diarization models download from the public
 `avencera/speakrs-models` repo on first run; no Hugging Face token is required.
 
 ```sh

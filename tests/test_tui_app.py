@@ -29,6 +29,7 @@ from paraspeakrs.tui.note import NotePanel  # noqa: E402
 from paraspeakrs.tui.speakers import SpeakerPanel  # noqa: E402
 from paraspeakrs.tui.state import DONE, FAILED, UiState  # noqa: E402
 from paraspeakrs.tui.voices import VoicesScreen  # noqa: E402
+from textual.worker import WorkerCancelled, WorkerFailed  # noqa: E402
 
 
 def _app(tmp_path: Path, browse_dir: Path | None = None, asr=None) -> DiarizeApp:
@@ -77,12 +78,25 @@ async def _drain(app, pilot, timeout: float = 5.0) -> None:
     await pilot.pause()
 
 
+async def _jobs_loaded(app) -> None:
+    """Wait until no job-list worker is still running.
+
+    The list loads on a worker thread, so a fixed number of pauses is a race that a
+    slower machine (the Windows runner) loses. The worker is exclusive: a newer
+    refresh cancels an older one, which is fine to skip.
+    """
+    while running := [w for w in app.workers if w.group == "jobs" and not w.is_finished]:
+        for worker in running:
+            try:
+                await worker.wait()
+            except (WorkerCancelled, WorkerFailed):
+                pass
+
+
 async def _select_processed(app, pilot, row: int = 0) -> SpeakerPanel:
     """Put the cursor on a processed recording and hand back its speaker panel."""
     app.screen.action_refresh()
-    # The job list loads on a worker thread; a fixed number of pauses is a race
-    # that a slower machine (the Windows runner) loses.
-    await app.workers.wait_for_complete([w for w in app.workers if w.group == "jobs"])
+    await _jobs_loaded(app)
     await pilot.pause()
     await pilot.pause()
     table = app.screen.query_one("#processed")

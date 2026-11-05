@@ -5,6 +5,68 @@ Autonomous decisions taken without waiting for review. Newest first.
 Each entry carries its review status. **Accepted** means the user reviewed it
 after the fact and let it stand; an entry stays **Pending** until they do.
 
+## 2026-11-05 — Cross-platform diarizer: keep the sidecar, on speakrs 0.7
+
+*Status: pending.*
+
+The research note (`research/cross-platform-...md`, §1.4) left two routes open. The user
+chose Linux x86_64 and Windows x64 as targets.
+
+- **Use upstream `pip install speakrs` in-process.** No Rust build in this repo; no
+  Windows wheel upstream, and its `DiarizationResult` has no embeddings (checked in the
+  0.7.0 sdist: `crates/speakrs-python/API.md`, `src/results.rs`), which the speaker
+  cache cannot do without.
+- **Keep `speakrs-diar`, upgrade to speakrs 0.7, build per platform.** ← chosen. The
+  0.5 → 0.7 migration needed no code change in `main.rs` (the result arrays became
+  newtypes that deref to the same `ndarray` types).
+
+Models are downloaded by the sidecar with `hf-hub` over rustls instead of speakrs'
+`online` feature: that one uses native-tls, which linked `libssl.so.3` into the Linux
+binary (seen with `ldd`), so a wheel built on one distribution would not start on
+another. Same repository, pinned revision and cache layout as speakrs' own downloader;
+upstream's Python wheels do the same.
+
+## 2026-11-05 — `paraspeakrs record`: where the recorder ships and what it links
+
+*Status: pending.*
+
+The user chose a CLI recorder with two time-aligned tracks for Linux and Windows.
+
+- **Its own PyPI project (`paraspeakrs-recorder`).** Cleanest name; needs a new trusted
+  publisher on PyPI before the next release can go out.
+- **A second binary in the `paraspeakrs-speakrs` wheel.** ← chosen. Nothing new to
+  register; the package description now says "native sidecars". Built only with the
+  crate's `recorder` feature, so the macOS wheel does not carry it.
+
+Linux backend: cpal's PulseAudio host (a pure-Rust client), because it lists monitor
+sources and PipeWire desktops serve it through `pipewire-pulse`. cpal's PipeWire host
+would link `libpipewire`. Either way cpal links ALSA on Linux unconditionally, so
+`paraspeakrs-record` needs the system's `libasound.so.2`. The Linux wheel is built with
+`--auditwheel skip` so that library is not vendored (a vendored copy looks for its
+plugins at the build container's paths), and `check-speakrs-wheel.py` allows it for
+that one binary only. A machine without ALSA can still diarize; only recording fails.
+
+The merge into the stereo `.m4a` is done by ffmpeg from Python rather than in Rust:
+paraspeakrs already requires ffmpeg, and it resamples the two tracks to one rate.
+
+## 2026-11-05 — CoreML default only on macOS 15 and later
+
+*Status: pending.*
+
+CI showed speakrs 0.7's compiled CoreML models fail to load on GitHub's `macos-14`
+runner and load on `macos-15`. `default_speakrs_mode()` now returns `cpu` before macOS 15
+instead of a mode that fails on every run there. Whether 0.5's models loaded on macOS 14
+was not checked.
+
+## 2026-11-05 — CI on every pushed branch
+
+*Status: pending.*
+
+`ci.yml` runs on every branch push and pull request: the tests on three platforms and
+the three wheel builds, about 5 minutes. The repository is public, so the macOS and
+Windows runners cost no Actions minutes. It caught five Windows test failures and the
+macOS 14 CoreML failure before either reached a release.
+
 ## 2026-11-04 — Recorder distribution: build on the user's Mac via `paraspeakrs install-recorder`
 
 *Status: pending.*

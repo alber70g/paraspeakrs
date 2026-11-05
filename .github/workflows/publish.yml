@@ -2,9 +2,10 @@ name: Publish to PyPI
 
 # Two distributions ship from this repo:
 #   paraspeakrs          - pure Python, one wheel for every platform
-#   paraspeakrs-speakrs  - the Rust diarization sidecar, macOS arm64 only
-# paraspeakrs pins paraspeakrs-speakrs exactly, so the sidecar must reach PyPI
-# first or the main package is unresolvable.
+#   paraspeakrs-speakrs  - the Rust diarization sidecar: macOS arm64, Linux x86_64
+#                          and Windows x64 wheels (build-speakrs.yml)
+# paraspeakrs depends on paraspeakrs-speakrs, so the sidecar reaches PyPI first and
+# a fresh install of the new paraspeakrs resolves to the matching sidecar.
 on:
   push:
     tags: ["v*"]
@@ -15,35 +16,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v8.3.2
-      - run: uv sync --group dev
-      - run: uv run pytest -q
+      # Tests mock the sidecar. Skipping it also keeps this job installable while
+      # the lockfile still names a sidecar release without a Linux wheel.
+      - run: uv sync --group dev --no-install-package paraspeakrs-speakrs
+      - run: uv run --no-sync pytest -q
 
   build-speakrs:
-    runs-on: macos-14 # arm64
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v8.3.2
-      - uses: dtolnay/rust-toolchain@stable
-      # blas-static compiles OpenBLAS from source, which needs a Fortran compiler.
-      - run: brew install gcc
-      - name: Build the wheel
-        working-directory: packages/speakrs-diar
-        run: |
-          # OpenBLAS compiles its own Fortran sources with Homebrew's gfortran, but ld
-          # does not search Homebrew's gcc lib dir, so linking libgfortran fails with
-          # "ld: library 'gfortran' not found". Computed from brew so a gcc upgrade
-          # does not silently break this.
-          export LIBRARY_PATH="$(brew --prefix gcc)/lib/gcc/current:${LIBRARY_PATH:-}"
-          # --auditwheel=repair vendors gfortran's runtime (libgfortran, libquadmath,
-          # libgcc_s) into the wheel. blas-static alone is not self-contained: it still
-          # links those, and they live in the build machine's Homebrew.
-          uvx --from 'maturin>=1.7,<2.0' maturin build --release --auditwheel=repair --out dist
-      - name: Fail unless the wheel is self-contained
-        run: python3 scripts/check-speakrs-wheel.py packages/speakrs-diar/dist/*.whl
-      - uses: actions/upload-artifact@v4
-        with:
-          name: speakrs-wheel
-          path: packages/speakrs-diar/dist/*.whl
+    uses: ./.github/workflows/build-speakrs.yml
 
   publish-speakrs:
     needs: [test, build-speakrs]
@@ -63,7 +42,8 @@ jobs:
       - uses: astral-sh/setup-uv@v8.3.2
       - uses: actions/download-artifact@v4
         with:
-          name: speakrs-wheel
+          pattern: speakrs-wheel-*
+          merge-multiple: true
           path: dist
       - name: Check the tag matches the sidecar version
         run: |

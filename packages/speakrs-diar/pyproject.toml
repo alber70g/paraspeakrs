@@ -18,6 +18,8 @@ classifiers = [
   "Development Status :: 4 - Beta",
   "Environment :: Console",
   "Operating System :: MacOS :: MacOS X",
+  "Operating System :: POSIX :: Linux",
+  "Operating System :: Microsoft :: Windows",
   "Topic :: Multimedia :: Sound/Audio :: Speech",
 ]
 requires-python = ">=3.11"
@@ -28,9 +30,7 @@ Repository = "https://github.com/alber70g/paraspeakrs"
 [tool.maturin]
 bindings = "bin"
 manifest-path = "Cargo.toml"
-# blas-static compiles OpenBLAS into the binary so it depends only on macOS system
-# frameworks; the default blas-system links Homebrew dylibs, which do not exist on a
-# machine that installed from PyPI. coreml is not optional: default_speakrs_mode()
-# returns "coreml" on darwin, so a binary without it fails on first run.
-no-default-features = true
-features = ["coreml", "blas-static"]
+# No features here: the crate's default is `cpu`, which builds anywhere, and each
+# release wheel adds its platform's accelerator on the command line (publish.yml):
+# `coreml` on macOS, which is not optional there because default_speakrs_mode()
+# returns "coreml" on darwin, and `cuda` on Linux x86_64.

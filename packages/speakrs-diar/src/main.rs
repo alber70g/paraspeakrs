@@ -12,6 +12,7 @@ use std::process::ExitCode;
 use ndarray::{Array2, Array3};
 use serde::Serialize;
 use speakrs::inference::ExecutionMode;
+use speakrs::models::{MODEL_REPOSITORY, MODEL_REVISION, required_model_files};
 use speakrs::pipeline::{DiarizationResult, OwnedDiarizationPipeline};
 
 const CONTRACT_VERSION: u32 = 1;
@@ -86,11 +87,12 @@ fn run() -> Result<String, String> {
             .unwrap_or_else(|| "audio".to_string())
     });
 
-    let mut pipeline = match &args.models_dir {
-        Some(dir) => OwnedDiarizationPipeline::from_dir(dir.clone(), args.mode),
-        None => OwnedDiarizationPipeline::from_pretrained(args.mode),
-    }
-    .map_err(|err| format!("failed to load models: {err}"))?;
+    let models_dir = match args.models_dir.clone() {
+        Some(dir) => dir,
+        None => download_models(args.mode, hf_hub::Cache::from_env())?,
+    };
+    let mut pipeline = OwnedDiarizationPipeline::from_dir(models_dir, args.mode)
+        .map_err(|err| format!("failed to load models: {err}"))?;
 
     let result = pipeline
         .run_with_file_id(&audio, &file_id)
@@ -157,6 +159,7 @@ fn next_value(argv: &mut impl Iterator<Item = String>, flag: &str) -> Result<Str
 
 fn parse_mode(name: &str) -> Result<ExecutionMode, String> {
     match name {
+        #[cfg(feature = "cpu")]
         "cpu" => Ok(ExecutionMode::Cpu),
         #[cfg(feature = "coreml")]
         "coreml" => Ok(ExecutionMode::CoreMl),
@@ -174,7 +177,10 @@ fn parse_mode(name: &str) -> Result<ExecutionMode, String> {
 }
 
 fn supported_modes() -> Vec<&'static str> {
-    let mut modes = vec!["cpu"];
+    let mut modes = Vec::new();
+    if cfg!(feature = "cpu") {
+        modes.push("cpu");
+    }
     if cfg!(feature = "coreml") {
         modes.extend(["coreml", "coreml-fast"]);
     }
@@ -182,6 +188,43 @@ fn supported_modes() -> Vec<&'static str> {
         modes.extend(["cuda", "cuda-fast"]);
     }
     modes
+}
+
+/// Fetch the files `mode` loads into the Hugging Face cache and return the snapshot
+/// directory that holds them.
+///
+/// This is what speakrs' own `from_pretrained` does, minus its native-tls client:
+/// same repository, same pinned revision, same cache layout, so a cache filled by
+/// either one serves the other. Only missing files touch the network.
+fn download_models(mode: ExecutionMode, cache: hf_hub::Cache) -> Result<PathBuf, String> {
+    use hf_hub::api::sync::ApiBuilder;
+    use hf_hub::{Repo, RepoType};
+
+    let mut builder = ApiBuilder::from_cache(cache.clone()).with_progress(false);
+    if let Ok(endpoint) = std::env::var("HF_ENDPOINT") {
+        builder = builder.with_endpoint(endpoint);
+    }
+    let api = builder
+        .build()
+        .map_err(|err| format!("failed to set up the model download: {err}"))?;
+    let repo = Repo::with_revision(MODEL_REPOSITORY.to_string(), RepoType::Model, MODEL_REVISION.to_string());
+    let cached = cache.repo(repo.clone());
+    let remote = api.repo(repo);
+
+    for file in required_model_files(mode) {
+        if cached.get(&file).is_none() {
+            remote
+                .get(&file)
+                .map_err(|err| format!("failed to download {file} from {MODEL_REPOSITORY}: {err}"))?;
+        }
+    }
+
+    // The revision is a commit hash, so it names its own snapshot directory.
+    Ok(cache
+        .path()
+        .join(format!("models--{}", MODEL_REPOSITORY.replace('/', "--")))
+        .join("snapshots")
+        .join(MODEL_REVISION))
 }
 
 fn load_wav(path: &Path) -> Result<Vec<f32>, String> {
@@ -284,7 +327,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn cpu_mode_is_always_available() {
+    #[cfg(feature = "cpu")]
+    fn cpu_mode_is_available_in_cpu_builds() {
         assert_eq!(parse_mode("cpu").unwrap(), ExecutionMode::Cpu);
     }
 
@@ -292,7 +336,9 @@ mod tests {
     fn unknown_mode_lists_what_this_build_supports() {
         let err = parse_mode("tpu").unwrap_err();
         assert!(err.contains("tpu"), "{err}");
-        assert!(err.contains("cpu"), "{err}");
+        for mode in supported_modes() {
+            assert!(err.contains(mode), "{err}");
+        }
     }
 
     #[test]
@@ -309,6 +355,39 @@ mod tests {
         let resampled = dir.join("44k.wav");
         write_wav(&resampled, 1, 44_100);
         assert!(load_wav(&resampled).unwrap_err().contains("16000 Hz"));
+    }
+
+    #[test]
+    #[cfg(feature = "cpu")]
+    fn a_filled_cache_is_used_without_the_network() {
+        // The cache layout hf-hub writes after a download: a ref file naming the
+        // commit, and the files under that commit's snapshot.
+        let root = std::env::temp_dir().join(format!("speakrs-diar-cache-{}", std::process::id()));
+        let repo = root.join(format!("models--{}", MODEL_REPOSITORY.replace('/', "--")));
+        let snapshot = repo.join("snapshots").join(MODEL_REVISION);
+        std::fs::create_dir_all(repo.join("refs")).unwrap();
+        std::fs::write(repo.join("refs").join(MODEL_REVISION), MODEL_REVISION).unwrap();
+        for file in required_model_files(ExecutionMode::Cpu) {
+            let path = snapshot.join(&file);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, b"").unwrap();
+        }
+
+        // An endpoint nothing listens on: any network access fails the test.
+        let dir = with_endpoint("http://127.0.0.1:9", || {
+            download_models(ExecutionMode::Cpu, hf_hub::Cache::new(root.clone()))
+        });
+
+        assert_eq!(dir.unwrap(), snapshot);
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    fn with_endpoint<T>(endpoint: &str, f: impl FnOnce() -> T) -> T {
+        // SAFETY: the only test that touches the environment.
+        unsafe { std::env::set_var("HF_ENDPOINT", endpoint) };
+        let out = f();
+        unsafe { std::env::remove_var("HF_ENDPOINT") };
+        out
     }
 
     #[test]

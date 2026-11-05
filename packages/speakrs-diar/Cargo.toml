@@ -2,7 +2,8 @@
 name = "speakrs-diar"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.89"
+# speakrs 0.7 needs 1.96.
+rust-version = "1.96"
 description = "Sidecar binary that runs speakrs diarization and emits JSON for the Python pipeline"
 
 [[bin]]
@@ -10,28 +11,29 @@ name = "speakrs-diar"
 path = "src/main.rs"
 
 [dependencies]
-# default-features = false drops speakrs' `default-linalg` so the BLAS backend is
-# chosen explicitly below; `online` is re-added because it was part of that set.
-speakrs = { version = "0.5", default-features = false, features = ["online"] }
+# Without speakrs' `online` feature: it downloads over native-tls, which links the
+# system OpenSSL on Linux, so a wheel built on one distribution fails to load on
+# another. main.rs downloads the same files with hf-hub over rustls instead, the
+# way upstream's own Python wheels do.
+speakrs = { version = "0.7", default-features = false }
+hf-hub = { version = "0.5", default-features = false, features = ["ureq"] }
 hound = "3.5"
 # The version speakrs uses, so its result arrays are these types.
 ndarray = "0.17.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
+# Each backend is a speakrs feature. `cpu` is native Rust with no runtime
+# dependency and works everywhere; the wheels add the platform's accelerator:
+#   macOS arm64:   cpu + coreml
+#   Linux x86_64:  cpu + cuda  (driver, cuDNN and cuBLAS load at run time; the
+#                               build needs no CUDA toolkit)
+#   Windows x64:   cpu         (speakrs has no Windows GPU backend)
 [features]
-default = ["blas-system"]
+default = ["cpu"]
+cpu = ["speakrs/cpu"]
 coreml = ["speakrs/coreml"]
 cuda = ["speakrs/cuda"]
-
-# Links Homebrew's prebuilt OpenBLAS. Fast to build, but the binary then depends on
-# dylibs under /opt/homebrew and will not run on a machine without them.
-blas-system = ["speakrs/openblas-system"]
-
-# Builds OpenBLAS from source into the binary (needs gfortran: `brew install gcc`).
-# Slower to build, but the result depends only on macOS system frameworks -- use
-# this for any binary that has to run on another machine.
-blas-static = ["speakrs/openblas-static"]
 
 [profile.release]
 opt-level = 3

@@ -1,8 +1,9 @@
+import sys
 from pathlib import Path
 
 import pytest
 
-from paraspeakrs.config import Settings
+from paraspeakrs.config import Settings, speakrs_bin_name
 
 
 def test_sherpa_backend_requires_model_dir():
@@ -49,6 +50,22 @@ def test_speakrs_backend_rejects_non_executable_binary(tmp_path):
 
     with pytest.raises(ValueError, match="not executable"):
         settings.validate_runtime()
+
+
+def test_windows_has_no_execute_bit_to_check(tmp_path, monkeypatch):
+    # os.access(X_OK) on Windows only says whether the file exists, so a real
+    # speakrs-diar.exe must not be rejected over a bit that platform lacks.
+    binary = tmp_path / "speakrs-diar.exe"
+    binary.write_text("")
+    binary.chmod(0o644)
+    monkeypatch.setattr(sys, "platform", "win32")
+    Settings(asr_backend="mock", diar_backend="speakrs", speakrs_bin=binary).validate_runtime()
+
+
+def test_sidecar_is_an_exe_on_windows_only():
+    assert speakrs_bin_name("win32") == "speakrs-diar.exe"
+    assert speakrs_bin_name("linux") == "speakrs-diar"
+    assert speakrs_bin_name("darwin") == "speakrs-diar"
 
 
 def test_speakrs_backend_rejects_missing_models_dir(tmp_path):

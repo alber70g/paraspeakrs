@@ -45,7 +45,10 @@ dependencies = [
   # version is on PyPI, which is a bootstrap trap on every single release. The
   # release workflow publishes the sidecar first, so a fresh install still gets the
   # matching build. Raise this floor if the sidecar's CLI or JSON output changes.
-  'paraspeakrs-speakrs>=0.2.0; sys_platform == "darwin" and platform_machine == "arm64"',
+  #
+  # Markers list the platforms the wheel is built for (publish.yml). Keep them in step
+  # with SPEAKRS_WHEEL_PLATFORMS in config.py. platform_machine is "AMD64" on Windows.
+  'paraspeakrs-speakrs>=0.2.0; (sys_platform == "darwin" and platform_machine == "arm64") or (sys_platform == "linux" and platform_machine == "x86_64") or (sys_platform == "win32" and platform_machine == "AMD64")',
 ]
 
 [project.optional-dependencies]

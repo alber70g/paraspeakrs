@@ -24,11 +24,22 @@ SherpaPrecision = Literal["fp32", "fp16", "int8"]
 SHERPA_MODEL_NAME = "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3"
 SHERPA_INT8_MODEL_NAME = "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8"
 SHERPA_FP16_MODEL_NAME = "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-fp16"
+
+
+def speakrs_bin_name(platform: str = sys.platform) -> str:
+    """maturin installs the sidecar as speakrs-diar.exe on Windows, and
+    Path.is_file() does not apply PATHEXT the way shutil.which() does."""
+    return "speakrs-diar.exe" if platform == "win32" else "speakrs-diar"
+
+
+SPEAKRS_BIN_NAME = speakrs_bin_name()
 # Only reachable from a source checkout; an installed tool gets the binary from the
 # paraspeakrs-speakrs wheel instead. Kept last in the search order so the dev workflow
 # keeps working without an env var.
-CHECKOUT_SPEAKRS_BIN = Path("packages/speakrs-diar/target/release/speakrs-diar")
-SPEAKRS_BIN_NAME = "speakrs-diar"
+CHECKOUT_SPEAKRS_BIN = Path("packages/speakrs-diar/target/release") / SPEAKRS_BIN_NAME
+# The platforms the paraspeakrs-speakrs wheel is built for, as an error message
+# names them. Keep in step with the dependency marker in pyproject.toml.
+SPEAKRS_WHEEL_PLATFORMS = "macOS arm64, Linux x86_64 and Windows x64"
 
 APP_DIR_NAME = "paraspeakrs"
 # The data directory's name up to 0.4.x, from before the project was renamed.
@@ -241,14 +252,16 @@ class Settings:
             if not self.speakrs_bin.is_file():
                 raise ValueError(
                     f"speakrs-diar binary not found: {self.speakrs_bin}\n"
-                    "The paraspeakrs-speakrs wheel ships this binary, but only for "
-                    "macOS arm64. Elsewhere, either:\n"
+                    "The paraspeakrs-speakrs wheel ships this binary for "
+                    f"{SPEAKRS_WHEEL_PLATFORMS}. Elsewhere, either:\n"
                     "  - use the other backend:  --diar-backend senko  "
                     "(needs the 'senko' extra)\n"
                     "  - build it from a checkout and point SPEAKRS_BIN at the result:\n"
-                    "      cd packages/speakrs-diar && cargo build --release --features coreml"
+                    "      cd packages/speakrs-diar && cargo build --release"
                 )
-            if not os.access(self.speakrs_bin, os.X_OK):
+            # Windows has no execute bit: os.access(X_OK) only reports whether the
+            # file exists, which the check above already did.
+            if sys.platform != "win32" and not os.access(self.speakrs_bin, os.X_OK):
                 raise ValueError(f"speakrs-diar binary is not executable: {self.speakrs_bin}")
             if self.speakrs_models_dir is not None and not self.speakrs_models_dir.is_dir():
                 raise ValueError(f"speakrs models dir not found: {self.speakrs_models_dir}")

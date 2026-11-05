@@ -84,13 +84,11 @@ uv run --extra tui paraspeakrs tui
 If Gatekeeper blocks the bundled one, or you are not on Apple Silicon:
 
 ```sh
-brew install openblas
 cd packages/speakrs-diar
-PKG_CONFIG_PATH="/opt/homebrew/opt/openblas/lib/pkgconfig" \
-  cargo build --release --features coreml     # NVIDIA: --features cuda
+cargo build --release --features coreml     # Linux/Windows: no flag; NVIDIA on Linux: --features cuda
 ```
 
-The crate defaults to the `blas-system` feature, which links Homebrew's OpenBLAS.
+The crate defaults to the `cpu` feature, which needs no system libraries.
 
 ## 6. Verify
 

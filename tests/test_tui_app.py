@@ -270,6 +270,9 @@ async def test_merging_selected_speakers_names_them_together(tmp_path):
         panel._merge_as("Michiel")
         await pilot.pause()
 
+        # A failed merge only shows as a toast; name it if it happens.
+        errors = [n.message for n in app._notifications if n.severity == "error"]
+        assert errors == []
         assert panel._rows["SPEAKER_01"].assigned_label == "Michiel"
         assert panel._rows["SPEAKER_02"].assigned_label == "Michiel"
         assert app.workspace.pipeline.speaker_cache.names() == ["Michiel"]

@@ -16,7 +16,10 @@ jobs:
           # Each wheel is `cpu` (the crate default) plus the platform's accelerator.
           # Keep in step with the dependency marker in the root pyproject.toml.
           - name: macos-arm64
-            os: macos-14
+            # Not macos-14: speakrs 0.7's compiled CoreML models do not load on
+            # macOS 14 ("compiler major version 9.0.0 is more recent than this
+            # framework major version 8.0.0"), so the smoke test needs a newer OS.
+            os: macos-15
             target: aarch64-apple-darwin
             features: coreml
             smoke-modes: cpu coreml

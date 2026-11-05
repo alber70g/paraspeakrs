@@ -6,6 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
 
+from .fileio import replace_file
 from .mcp_store import ArtifactStore, apply_labels, fingerprint_file, talk_seconds
 from .models import PipelineArtifacts
 from .pipeline import ProgressCallback, TranscriptionPipeline
@@ -568,7 +569,7 @@ class LabelingWorkspace:
         out.parent.mkdir(parents=True, exist_ok=True)
         temp_path = out.with_suffix(".json.tmp")
         temp_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-        temp_path.replace(out)
+        replace_file(temp_path, out)
         return out.resolve()
 
     def write_diarization_json(
@@ -604,7 +605,7 @@ class LabelingWorkspace:
         out.parent.mkdir(parents=True, exist_ok=True)
         temp_path = out.with_suffix(".json.tmp")
         temp_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-        temp_path.replace(out)
+        replace_file(temp_path, out)
         return out.resolve()
 
     def _speaker_entries(

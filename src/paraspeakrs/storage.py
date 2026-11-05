@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from .fileio import replace_file
 from .models import JobRecord, JobStatus, TranscriptionResult
 
 
@@ -69,7 +70,7 @@ class JobStore:
             json.dumps(record.model_dump(mode="json"), indent=2),
             encoding="utf-8",
         )
-        temp_path.replace(path)
+        replace_file(temp_path, path)
 
     def _path(self, job_id: str) -> Path:
         return self.root / f"{job_id}.json"

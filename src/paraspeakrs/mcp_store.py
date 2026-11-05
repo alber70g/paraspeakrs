@@ -9,6 +9,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
+from .fileio import replace_file
 from .models import PipelineArtifacts, TranscriptionResult
 
 LOGGER = logging.getLogger("uvicorn.error")
@@ -40,7 +41,7 @@ class ArtifactStore:
         path = self._path(job_id)
         temp_path = path.with_suffix(".json.tmp")
         temp_path.write_text(artifacts.model_dump_json(indent=2), encoding="utf-8")
-        temp_path.replace(path)
+        replace_file(temp_path, path)
 
     def load(self, job_id: str) -> PipelineArtifacts:
         path = self._path(job_id)
@@ -129,7 +130,7 @@ class ArtifactStore:
         path.parent.mkdir(parents=True, exist_ok=True)
         temp_path = path.with_suffix(".json.tmp")
         temp_path.write_text(json.dumps({"note": note}, indent=2), encoding="utf-8")
-        temp_path.replace(path)
+        replace_file(temp_path, path)
 
     def _note_path(self, job_id: str) -> Path:
         return self.root / job_id / "note.json"

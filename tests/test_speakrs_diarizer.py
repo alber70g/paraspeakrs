@@ -88,11 +88,11 @@ def test_passes_mode_and_models_dir_to_the_binary(tmp_path):
     diarizer.diarize(tmp_path / "audio.wav")
 
     assert runner.calls[0] == [
-        "/opt/speakrs-diar",
+        str(Path("/opt/speakrs-diar")),
         "--mode",
         "coreml",
         "--models-dir",
-        "/models",
+        str(Path("/models")),
         str(tmp_path / "audio.wav"),
     ]
 

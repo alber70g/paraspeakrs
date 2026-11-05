@@ -80,6 +80,9 @@ async def _drain(app, pilot, timeout: float = 5.0) -> None:
 async def _select_processed(app, pilot, row: int = 0) -> SpeakerPanel:
     """Put the cursor on a processed recording and hand back its speaker panel."""
     app.screen.action_refresh()
+    # The job list loads on a worker thread; a fixed number of pauses is a race
+    # that a slower machine (the Windows runner) loses.
+    await app.workers.wait_for_complete([w for w in app.workers if w.group == "jobs"])
     await pilot.pause()
     await pilot.pause()
     table = app.screen.query_one("#processed")

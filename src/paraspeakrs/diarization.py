@@ -225,7 +225,11 @@ class SpeakrsDiarizer:
         # A panic (exit 101) in speakrs or onnxruntime is only diagnosable with
         # its backtrace; a user's own RUST_BACKTRACE setting still wins.
         env = {"RUST_BACKTRACE": "1", **os.environ}
-        completed = self.runner(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
+        # The sidecar writes UTF-8; text=True alone decodes with the locale's
+        # encoding, which is cp1252 on Windows.
+        completed = self.runner(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", env=env
+        )
         if completed.returncode != 0:
             raise RuntimeError(
                 f"speakrs-diar failed with exit code {completed.returncode}: {(completed.stderr or '').strip()}"

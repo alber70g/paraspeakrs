@@ -5,6 +5,8 @@ import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from ..fileio import replace_file
+
 LOGGER = logging.getLogger(__name__)
 
 WAITING = "waiting"
@@ -107,7 +109,7 @@ class UiState:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             temp = self.path.with_suffix(".json.tmp")
             temp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-            temp.replace(self.path)
+            replace_file(temp, self.path)
         except OSError as exc:
             LOGGER.warning("could not save UI state to %s: %s", self.path, exc)
 

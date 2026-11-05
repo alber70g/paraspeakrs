@@ -86,7 +86,7 @@ def test_the_swift_sources_use_no_swiftui_macros_the_command_line_tools_cannot_e
     offenders = [
         f"{path.name}:{number}"
         for path in sources.rglob("*.swift")
-        for number, line in enumerate(path.read_text().splitlines(), 1)
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1)
         if not line.lstrip().startswith("//") and re.search(r"@State\b", line)
     ]
     assert offenders == []

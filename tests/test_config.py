@@ -43,6 +43,7 @@ def test_speakrs_backend_requires_a_built_binary(tmp_path):
         settings.validate_runtime()
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows has no execute bit")
 def test_speakrs_backend_rejects_non_executable_binary(tmp_path):
     binary = tmp_path / "speakrs-diar"
     binary.write_text("")

@@ -6,6 +6,8 @@ All notable changes to `paraspeakrs` are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.11.0] — 2026-11-09
+
 ### Added
 
 - **`paraspeakrs live`: a spike of live meeting analysis.** `live replay` plays a

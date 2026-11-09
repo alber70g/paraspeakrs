@@ -27,12 +27,17 @@ voice cache cleanup, starting `live follow` from the recorder, talk-time balance
 
 ## Order
 
-1. **Persona package** (in progress): personas during the meeting (items 4 and 5 above).
-2. Decisions and to-dos.
-3. Catch me up.
-4. Summary and follow-up mail.
-5. Final pass after the stop.
-6. Search across meetings, then the meeting overview and one web app that replaces the TUI (items 2 and 3 above).
+1. **Recorder offers `live follow`**: pressing the meeting shortcut pops up the recorder panel
+   with Open / Dismiss; Open starts `live follow` for the recording and opens the page; after
+   Dismiss the menu-bar panel keeps an "Open live meeting" button. Plan:
+   `docs/plans/2026-11-09-recorder-live-follow-prompt.md`.
+2. **Persona package**: personas during the meeting (items 4 and 5 above). Plan:
+   `docs/plans/2026-11-09-live-persona-package.md`.
+3. Decisions and to-dos.
+4. Catch me up.
+5. Summary and follow-up mail.
+6. Final pass after the stop.
+7. Search across meetings, then the meeting overview and one web app that replaces the TUI (items 2 and 3 above).
 
 Not ordered yet: notes on lines (item 1), importing voices from another laptop's `speaker-cache.json` (item 6).
 

@@ -1048,6 +1048,20 @@ jump to it in the timeline. Before Start, the brief editor can add personas from
 the library or the suggestions too. A rerun costs one decision call per 30 s of
 meeting, plus a chat call for each comment.
 
+**Decisions and to-dos.** The decision call that asks the personas about each batch
+also asks whether the new lines take a decision and whether they agree on a task
+someone will do; this costs no extra call, and it is asked even when no persona is
+active. On a yes (`--item-threshold`, default 0.5) one chat call adds the item to the
+list, or updates the item it already has, for example when an owner or a new date is
+named. A to-do keeps its owner by the name the page gives the speaker, and its due
+date as it was said ("Friday"); dates are not parsed. You can edit an item's text,
+owner and due date, or delete it: the model does not change an edited item again,
+and it is told not to add a deleted one again. A rerun does not look for items. The
+list is written as Markdown to `decisions-and-todos.md` in the session folder on
+every change, so it is there when the meeting ends or the process stops. On the
+page the list is in the "Decisions and to-dos" box: click an item's time to jump to
+that moment, **Download .md** for the file, **Copy** for the list as plain text.
+
 Every probability is shown under the batch it belongs to, to help pick thresholds
 for your models (`--topic-threshold`, default 0.6; `--comment-threshold`, default
 0.5). For `replay`, `--speed` sets the speed (default 10× real time, 0 for no

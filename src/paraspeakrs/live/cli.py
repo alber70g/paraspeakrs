@@ -69,6 +69,12 @@ def _add_session_flags(parser: argparse.ArgumentParser) -> None:
         "--comment-threshold", type=float, default=0.5, help="p(comment) that makes a persona speak (default 0.5)"
     )
     parser.add_argument(
+        "--item-threshold",
+        type=float,
+        default=0.5,
+        help="p(decision) or p(to-do) that updates the decisions and to-dos (default 0.5)",
+    )
+    parser.add_argument(
         "--min-section", type=float, default=60.0, help="seconds before a topic change can close a section (default 60)"
     )
     parser.add_argument("--host", default="127.0.0.1")
@@ -204,7 +210,10 @@ def _serve(args: argparse.Namespace, source, session_dir: Path) -> None:
         # <workspace>/live/briefs, next to <workspace>/live/sessions.
         briefs_dir=session_dir.parents[1] / "briefs",
         thresholds=Thresholds(
-            topic=args.topic_threshold, comment=args.comment_threshold, min_section_seconds=args.min_section
+            topic=args.topic_threshold,
+            comment=args.comment_threshold,
+            item=args.item_threshold,
+            min_section_seconds=args.min_section,
         ),
         brief=brief,
         step=args.step,

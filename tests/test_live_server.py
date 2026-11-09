@@ -113,13 +113,14 @@ def test_cli_live_dispatches_with_the_workspace(monkeypatch, tmp_path):
     monkeypatch.setattr("paraspeakrs.live.cli.run", lambda args, env: seen.append((args, env.workspace_dir)))
     monkeypatch.setenv("PARAKEET_WORKSPACE_DIR", str(tmp_path))
     monkeypatch.setenv("PARASPEAKRS_CHAT_URL", "http://mac.local:8000/v1")
-    monkeypatch.setattr(cli.sys, "argv", ["paraspeakrs", "live", "replay", "m.txt", "--speed", "0"])
+    monkeypatch.setattr(cli.sys, "argv", ["paraspeakrs", "live", "replay", "m.txt", "--speed", "0", "--item-threshold", "0.7"])
 
     cli._main()
 
     args, workspace = seen[0]
     assert (args.live_command, args.speed, args.chat_url) == ("replay", 0.0, "http://mac.local:8000/v1")
     assert args.decisions_url == "http://localhost:8001/v1/decisions"
+    assert args.item_threshold == 0.7
     assert workspace == tmp_path.resolve()
 
 
@@ -335,3 +336,37 @@ def test_personas_are_proposed_from_what_was_heard_before_the_start(session):
     assert reply["question"] is None and reply["history"][-1]["role"] == "assistant"
     assert empty.status_code == 422
     assert "Anna: We also build the app." in fake.requests[0]["messages"][0]["content"]
+
+
+def test_items_are_edited_deleted_and_kept_as_markdown_in_the_session(session, tmp_path):
+    written = tmp_path / "session" / "decisions-and-todos.md"
+    with TestClient(create_app(session)) as client:
+        early = [
+            client.get("/api/items").status_code,
+            client.get("/api/items.md").status_code,
+            client.post("/api/items/D1", json={"text": "x"}).status_code,
+            client.delete("/api/items/D1").status_code,
+        ]
+        client.post("/api/start", json={"brief": BRIEF})
+        _wait_for(lambda: session.state == "finished")
+        listed = client.get("/api/items").json()["items"]
+        edited = client.post("/api/items/D1", json={"owner": "Anna"})
+        unknown = client.post("/api/items/T9", json={"text": "x"})
+        empty = client.post("/api/items/D1", json={"text": " "})
+        download = client.get("/api/items.md")
+        after_edit = written.read_text()
+        gone = client.delete("/api/items/D1")
+        again = client.delete("/api/items/D1")
+        after = client.get("/api/items").json()["items"]
+
+    assert early == [409, 409, 409, 409]
+    assert [(i["id"], i["text"]) for i in listed] == [("D1", "Launch on March 3rd.")]
+    assert (edited.status_code, edited.json()["item"]["owner"], edited.json()["item"]["edited"]) == (200, "Anna", True)
+    assert (unknown.status_code, empty.status_code) == (404, 422)
+    assert download.headers["content-type"].startswith("text/markdown")
+    assert download.headers["content-disposition"] == 'attachment; filename="launch-sync-decisions-and-todos.md"'
+    # The file in the session follows every change, so it is complete whenever the process stops.
+    assert download.text == after_edit and "- Launch on March 3rd. (owner: Anna) [" in after_edit
+    assert (gone.status_code, again.status_code, after) == (200, 404, [])
+    assert "## Decisions\n\nNone." in written.read_text()
+    assert [e["items"] for e in session.events if e["type"] == "items"][-1] == []

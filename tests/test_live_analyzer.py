@@ -293,3 +293,115 @@ async def test_a_removed_persona_keeps_its_comments_and_its_key():
     # Added again, it is a new persona: the old comments stay with the old key.
     assert again.key == "scope-guard-2"
     assert [p["key"] for p in _of(events, "personas")[-1]["personas"]] == ["owner-hawk", "budget-keeper", "scope-guard-2"]
+
+
+# -- decisions and to-dos ------------------------------------------------------
+
+ITEMS_PROMPT = "You keep the list of decisions and to-dos"
+
+
+def _items_chat(*replies: list[dict]):
+    """Answers the item prompts with ``replies`` in turn, every other prompt like ``meeting_chat``."""
+    queue = list(replies)
+
+    def reply(messages):
+        if messages[0]["content"].startswith(ITEMS_PROMPT):
+            return json.dumps({"items": queue.pop(0)})
+        return meeting_chat(messages)
+
+    return reply
+
+
+def _item_prompts(chat: FakeChat) -> list[str]:
+    return [last_user(r["messages"]) for r in chat.requests if r["messages"][0]["content"].startswith(ITEMS_PROMPT)]
+
+
+def _todo_yes(key, question, state):
+    return 0.9 if key == "outcome__todo" else 0.0
+
+
+async def test_an_agreed_task_adds_an_item_and_a_later_update_by_id_changes_it():
+    chat = FakeChat(
+        _items_chat(
+            [{"kind": "todo", "text": "Send the invite", "owner": "Ben"}],
+            [{"id": "T1", "kind": "todo", "text": "Send the invite", "due": "Friday"}],
+        )
+    )
+    analyzer, events = _fresh(FakeDecisions(_todo_yes), chat)
+    await analyzer.feed([Line(0, 10, "Ben", "I'll send the invite")])
+    await analyzer.feed([Line(10, 20, "Anna", "by Friday please")])
+
+    first = {"id": "T1", "kind": "todo", "text": "Send the invite", "owner": "Ben", "due": "", "at": 10, "section": 0}
+    assert [e["items"] for e in _of(events, "items")] == [
+        [{**first, "edited": False}],
+        [{**first, "due": "Friday", "edited": False}],
+    ]
+    # The second call saw the list, which is how the model can update instead of adding.
+    assert "Current items:\nnone" in _item_prompts(chat)[0]
+    assert '"id": "T1"' in _item_prompts(chat)[1]
+    assert _of(events, "decision")[0]["items"] == {"decision": 0.0, "todo": 0.9}
+
+
+async def test_an_item_the_user_edited_is_not_overwritten_by_the_model():
+    chat = FakeChat(
+        _items_chat(
+            [{"kind": "todo", "text": "Send the invite", "owner": "Ben"}],
+            [{"id": "T1", "kind": "todo", "text": "Send the invite", "owner": "Carol"}],
+        )
+    )
+    analyzer, events = _fresh(FakeDecisions(_todo_yes), chat)
+    await analyzer.feed([Line(0, 10, "Ben", "I'll send the invite")])
+    analyzer.edit_item("T1", owner="Anna")
+    await analyzer.feed([Line(10, 20, "Carol", "I can do the invite")])
+
+    assert [(i.owner, i.edited) for i in analyzer.items.visible()] == [("Anna", True)]
+    assert [e["items"][0]["owner"] for e in _of(events, "items")] == ["Ben", "Anna"]  # no event for the ignored update
+
+
+async def test_a_deleted_item_is_hidden_and_sent_to_the_model_as_removed():
+    chat = FakeChat(_items_chat([{"kind": "decision", "text": "Launch on 3 March"}], []))
+    analyzer, events = _fresh(FakeDecisions(lambda key, q, state: 0.9 if key == "outcome__decision" else 0.0), chat)
+    await analyzer.feed([Line(0, 10, "Anna", "we launch on 3 March")])
+    analyzer.delete_item("D1")
+    await analyzer.feed([Line(10, 20, "Ben", "so, 3 March")])
+
+    assert _of(events, "items")[-1]["items"] == []
+    prompt = _item_prompts(chat)[1]
+    assert "Current items:\nnone" in prompt
+    assert prompt.endswith("Removed by the user, do not add again:\n- D1 (decision): Launch on 3 March")
+
+
+async def test_no_decision_and_no_task_costs_no_chat_call():
+    chat = FakeChat(meeting_chat)
+    analyzer, events = _fresh(FakeDecisions(lambda key, q, state: 0.4 if key.startswith("outcome__") else 0.0), chat)
+    await analyzer.feed([Line(0, 10, "Anna", "what do we think about March?")])
+    assert chat.requests == []
+    assert _of(events, "items") == []
+    assert _of(events, "decision")[0]["items"] == {"decision": 0.4, "todo": 0.4}
+
+
+async def test_the_outcome_questions_ride_on_the_comment_request_and_not_on_a_rerun():
+    decisions = FakeDecisions(lambda key, q, state: 0.9 if key == "comment__scope-guard" else 0.0)
+    analyzer, _ = _fresh(decisions, FakeChat(meeting_chat))
+    await analyzer.feed([Line(0, 10, "Anna", "a")])
+
+    assert len(decisions.requests) == 1  # no extra decision call for the outcomes
+    assert set(decisions.requests[0]["questions"]) == {
+        "comment__owner-hawk",
+        "comment__budget-keeper",
+        "outcome__decision",
+        "outcome__todo",
+    }
+    analyzer.add_persona(SCOPE, rerun=True)
+    await analyzer.finish()
+    (rerun,) = _asked(decisions, "scope-guard")
+    assert set(rerun["questions"]) == {"comment__scope-guard"}  # the past is not searched for items again
+
+
+async def test_without_active_personas_the_outcome_questions_are_still_asked():
+    decisions = FakeDecisions(_todo_yes)
+    chat = FakeChat(_items_chat([{"kind": "todo", "text": "Book it"}]))
+    analyzer = Analyzer(Brief(title="Launch sync"), decisions.client(), chat.client("m"), lambda event: None)
+    await analyzer.feed([Line(0, 10, "Anna", "I'll book it")])
+    assert [set(r["questions"]) for r in decisions.requests] == [{"outcome__decision", "outcome__todo"}]
+    assert [i.text for i in analyzer.items.visible()] == ["Book it"]

@@ -21,6 +21,12 @@ All notable changes to `paraspeakrs` are documented here. The format follows
   the meeting so far; rerun comments land in the timeline at the moment they are
   about. Personas can be paused and removed; changes are saved in the brief. A
   Comments list in the sidebar jumps to each comment in the timeline.
+- **`paraspeakrs live`: decisions and to-dos during the meeting.** Each batch's
+  decision call also asks whether the lines take a decision or agree on a task; on a
+  yes the chat model adds or updates items with owner and due date as said. Items
+  can be edited and deleted; the model leaves edited items alone and does not add
+  deleted ones again. The list is kept as `decisions-and-todos.md` in the session
+  folder. New flag `--item-threshold` (default 0.5).
 
 ### Fixed
 

@@ -2,8 +2,8 @@
 
 Each batch of new lines costs at most two decision calls, which JEV answers in well
 under a second: one asks whether the topic changed and on which line, the other asks
-every active persona at once whether the new lines give it something to say. Only a
-yes costs a chat call.
+every active persona at once whether the new lines give it something to say, and
+whether they take a decision or agree on a to-do. Only a yes costs a chat call.
 
 Personas can be added, paused and removed while the meeting runs. One added with a
 rerun also goes over what was said before it joined, a ``rerun_step`` of meeting at
@@ -13,12 +13,15 @@ a time, and sees only what had been said up to each step.
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 from .brief import Brief, Persona, persona_key
 from .chat import ChatClient, ChatError
 from .decisions import Answer, ChoiceAnswer, DecisionClient, DecisionError, NoulAnswer, choice, noul
+from .intake import ask_json
+from .items import KINDS, Item, ItemList, parse_updates
 from .transcript import Line, render
 from ..transcript_txt import format_time
 
@@ -27,6 +30,49 @@ Emit = Callable[[dict], None]
 TOPIC_TRUE = "The new lines start a different subject, agenda item, problem or decision than the current section."
 TOPIC_FALSE = "The new lines continue, deepen or briefly digress from the subject of the current section."
 SKIP_DEFAULT = "Nothing in the new lines meets the comment criteria, or it was already commented on."
+# Asked with the comment questions of every live batch, never in a rerun.
+OUTCOME_QUESTIONS = {
+    "outcome__decision": noul(
+        "Do `new_lines` take a decision? Read `section_so_far` for context.",
+        true=(
+            "In `new_lines` the participants settle something: they choose between options, agree on a plan, "
+            "date, number or approach, or confirm or change a decision taken earlier."
+        ),
+        false=(
+            "`new_lines` only propose, discuss, ask or weigh options, or repeat a decision already taken "
+            "in `section_so_far` without changing it."
+        ),
+    ),
+    "outcome__todo": noul(
+        "Do `new_lines` agree on a task someone will do? Read `section_so_far` for context.",
+        true=(
+            "In `new_lines` someone takes on or is given a concrete task to do after this moment, "
+            "or the owner or the date of a task agreed earlier is named or changed."
+        ),
+        false=(
+            "`new_lines` mention work only in general, describe work already done, "
+            "or wish for something without anyone agreeing to do it."
+        ),
+    ),
+}
+ITEMS_SYSTEM = """\
+You keep the list of decisions and to-dos of a meeting that is still going on.
+A decision is something the participants settled: a choice, a plan, a date, a number.
+A to-do is a task someone agreed to do. Its owner is the person who will do it, named as in the transcript; \
+its due date is the date or moment as it was said, such as "Friday" or "before the release". \
+Leave owner or due empty when they were not said.
+
+Read the new lines and reply with exactly one JSON object, the items they add or change:
+{{"items": [{{"id": "D1", "kind": "decision", "text": "...", "owner": "", "due": ""}}]}}
+- kind is "decision" or "todo".
+- To change an item on the current list, for example a new owner or a moved date, send it in full with its id.
+- For a new item, leave out the id. Do not add an item that is already on the list.
+- Do not send items that did not change, and never add again an item the user removed.
+- Write each text as one short sentence in {language}.
+- Reply {{"items": []}} when the new lines add or change nothing.
+
+About this meeting:
+{context}"""
 
 
 @dataclass
@@ -35,6 +81,8 @@ class Thresholds:
 
     topic: float = 0.6
     comment: float = 0.5
+    # p(decision) or p(to-do) that has the chat model update the items.
+    item: float = 0.5
     # A section shorter than this is never closed by a topic change: one stray
     # sentence should not become a section of its own.
     min_section_seconds: float = 60.0
@@ -94,6 +142,7 @@ class Analyzer:
         self.rerun_step = rerun_step
         self.sections: list[Section] = []
         self.comments: list[dict] = []
+        self.items = ItemList()
         self.paused: set[str] = set()
         self._background: set[asyncio.Task] = set()
         # Per persona: its rerun, and the progress last reported.
@@ -137,10 +186,13 @@ class Analyzer:
         await self._assess(section, lines, topic_p)
 
     async def _assess(self, section: Section, lines: list[Line], topic_p: float | None) -> None:
-        comment_p = await self._consider_comments(section, lines)
-        self.emit(
-            {"type": "decision", "section": section.index, "at": lines[-1].end, "topic": topic_p, "comments": comment_p}
-        )
+        comment_p, item_p = await self._consider_comments(section, lines)
+        event = {
+            "type": "decision", "section": section.index, "at": lines[-1].end, "topic": topic_p, "comments": comment_p
+        }
+        if item_p is not None:
+            event["items"] = item_p
+        self.emit(event)
 
     async def finish(self) -> None:
         """The meeting ended: close the last section and wait for pending titles and reruns."""
@@ -291,16 +343,29 @@ class Analyzer:
 
     # -- comments -----------------------------------------------------------
 
-    async def _consider_comments(self, section: Section, lines: list[Line]) -> dict[str, float]:
+    async def _consider_comments(
+        self, section: Section, lines: list[Line]
+    ) -> tuple[dict[str, float], dict[str, float] | None]:
         active = [p for p in self.brief.personas if p.key not in self.paused]
-        return await self._ask_personas(active, section, section.lines, lines)
+        return await self._ask_personas(active, section, section.lines, lines, outcomes=True)
 
     async def _ask_personas(
-        self, personas: list[Persona], section: Section, so_far: list[Line], lines: list[Line], *, rerun: bool = False
-    ) -> dict[str, float]:
-        """One decision call for these personas about ``lines``; ``so_far`` is the section up to and with them."""
-        if not personas:
-            return {}
+        self,
+        personas: list[Persona],
+        section: Section,
+        so_far: list[Line],
+        lines: list[Line],
+        *,
+        rerun: bool = False,
+        outcomes: bool = False,
+    ) -> tuple[dict[str, float], dict[str, float] | None]:
+        """One decision call for these personas about ``lines``; ``so_far`` is the section up to and with them.
+
+        With ``outcomes`` the same call also asks whether the lines take a decision or
+        agree on a to-do: p per kind, or None when that was not asked or not answered.
+        """
+        if not personas and not outcomes:
+            return {}, None
         state: dict = {
             "meeting": self.brief.meeting_state(),
             "section_so_far": _text(so_far, self.state_chars),
@@ -311,15 +376,20 @@ class Analyzer:
         if already:
             state["already_commented"] = already
         questions = {f"comment__{p.key}": self._comment_question(p, p.key in already) for p in personas}
+        if outcomes:
+            questions.update(OUTCOME_QUESTIONS)
         answers = await self._decide(state, questions)
         if not answers:
-            return {}
+            return {}, None
         probabilities = {p.key: _p(answers, f"comment__{p.key}") for p in personas}
         speaking = [p for p in personas if probabilities[p.key] >= self.thresholds.comment]
+        item_p = {kind: _p(answers, f"outcome__{kind}") for kind in KINDS} if outcomes else None
+        update_items = item_p is not None and max(item_p.values()) >= self.thresholds.item
         await asyncio.gather(
-            *(self._comment(p, section, so_far, lines, probabilities[p.key], rerun=rerun) for p in speaking)
+            *(self._comment(p, section, so_far, lines, probabilities[p.key], rerun=rerun) for p in speaking),
+            *([self._update_items(section, so_far, lines)] if update_items else []),
         )
-        return probabilities
+        return probabilities, item_p
 
     def _said(self, section: Section, key: str, until: float) -> list[str]:
         """What the persona said in the section about lines up to ``until``: a rerun must not see later comments."""
@@ -369,6 +439,48 @@ class Analyzer:
             comment["rerun"] = True  # written later, about this moment
         self.comments.append(comment)
         self.emit(comment)
+
+    # -- decisions and to-dos ---------------------------------------------
+
+    async def _update_items(self, section: Section, so_far: list[Line], lines: list[Line]) -> None:
+        """One chat call that adds or updates items from ``lines``, knowing the current list."""
+        system = ITEMS_SYSTEM.format(
+            language=self.brief.language or "the language of the meeting", context=self.brief.context_text()
+        )
+        current = "\n".join(
+            json.dumps({"id": i.id, "kind": i.kind, "text": i.text, "owner": i.owner, "due": i.due}, ensure_ascii=False)
+            for i in self.items.visible()
+        )
+        removed = [f"- {i.id} ({i.kind}): {i.text}" for i in self.items.items if i.deleted]
+        user = (
+            f"The section so far:\n{_text(so_far, self.state_chars)}\n\n"
+            f"The new lines:\n{render(lines)}\n\n"
+            f"Current items:\n{current or 'none'}"
+        )
+        if removed:
+            user += "\n\nRemoved by the user, do not add again:\n" + "\n".join(removed)
+        messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
+        try:
+            updates = await ask_json(self.chat, messages, parse_updates, what="decisions and to-dos")
+        except ChatError as exc:
+            self._error("chat", str(exc))
+            return
+        self._last_error.pop("chat", None)
+        if self.items.apply(updates, at=lines[-1].end, section=section.index):
+            self._items_changed()
+
+    def edit_item(self, item_id: str, **fields: str | None) -> Item:
+        """The user's correction (text, owner, due); KeyError for an unknown id."""
+        item = self.items.edit(item_id, **fields)
+        self._items_changed()
+        return item
+
+    def delete_item(self, item_id: str) -> None:
+        self.items.delete(item_id)
+        self._items_changed()
+
+    def _items_changed(self) -> None:
+        self.emit({"type": "items", "items": [i.to_json() for i in self.items.visible()]})
 
     # -- questions --------------------------------------------------------
 

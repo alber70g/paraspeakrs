@@ -4,7 +4,8 @@ One process serves one meeting. Its lines come from a source: a finished transcr
 played back, or a recording transcribed while it is being made. Everything that
 happens is an event: the page gets them over server-sent events (all past ones
 first, so a reload loses nothing), and each is appended to ``events.jsonl`` in the
-session directory.
+session directory. The decisions and to-dos are also kept there as Markdown, written
+on every change, so the file is complete whenever the meeting or the process ends.
 """
 
 from __future__ import annotations
@@ -20,7 +21,7 @@ from pathlib import Path
 from typing import Protocol
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, Response, StreamingResponse
 from pydantic import BaseModel, ValidationError
 
 from .analyzer import Analyzer, Thresholds
@@ -165,6 +166,9 @@ class LiveSession:
         self.session_dir.mkdir(parents=True, exist_ok=True)
         with (self.session_dir / "events.jsonl").open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(event, ensure_ascii=False) + "\n")
+        if event["type"] == "items":
+            # Every change to the items, by the model or the user, comes through here.
+            (self.session_dir / "decisions-and-todos.md").write_text(self.items_markdown(), encoding="utf-8")
         for queue in self._subscribers:
             queue.put_nowait(event)
 
@@ -211,6 +215,19 @@ class LiveSession:
     def remove_persona(self, key: str) -> None:
         self._running().remove(key)
         self._save_brief()
+
+    def items(self) -> list[dict]:
+        return [item.to_json() for item in self._running().items.visible()]
+
+    def edit_item(self, item_id: str, **fields: str | None) -> dict:
+        return self._running().edit_item(item_id, **fields).to_json()
+
+    def delete_item(self, item_id: str) -> None:
+        self._running().delete_item(item_id)
+
+    def items_markdown(self) -> str:
+        analyzer = self._running()
+        return analyzer.items.markdown(analyzer.brief.title)
 
     def _running(self) -> Analyzer:
         if self.analyzer is None:
@@ -366,6 +383,12 @@ class PersonaRequest(BaseModel):
 
 class PauseRequest(BaseModel):
     paused: bool
+
+
+class ItemRequest(BaseModel):
+    text: str | None = None
+    owner: str | None = None
+    due: str | None = None
 
 
 def create_app(session: LiveSession) -> FastAPI:
@@ -526,6 +549,46 @@ def create_app(session: LiveSession) -> FastAPI:
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=f"no persona {key!r} in this meeting") from exc
         return {"removed": key}
+
+    @app.get("/api/items")
+    def items() -> dict:
+        try:
+            return {"items": session.items()}
+        except SessionStateError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.get("/api/items.md")
+    def items_markdown() -> Response:
+        try:
+            text = session.items_markdown()
+        except SessionStateError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        name = f"{slug(session.brief.title) or 'meeting'}-decisions-and-todos.md"
+        return Response(
+            text, media_type="text/markdown", headers={"Content-Disposition": f'attachment; filename="{name}"'}
+        )
+
+    @app.post("/api/items/{item_id}")
+    async def edit_item(item_id: str, request: ItemRequest) -> dict:
+        try:
+            # In the event loop, like every endpoint that emits an event.
+            return {"item": session.edit_item(item_id, text=request.text, owner=request.owner, due=request.due)}
+        except SessionStateError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=f"no item {item_id!r} in this meeting") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.delete("/api/items/{item_id}")
+    async def delete_item(item_id: str) -> dict:
+        try:
+            session.delete_item(item_id)
+        except SessionStateError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=f"no item {item_id!r} in this meeting") from exc
+        return {"deleted": item_id}
 
     @app.get("/api/events")
     async def events() -> StreamingResponse:

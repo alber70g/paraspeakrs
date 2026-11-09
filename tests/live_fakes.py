@@ -90,6 +90,10 @@ def last_user(messages: list[dict]) -> str:
 def meeting_chat(messages: list[dict]) -> str:
     """Replies the way a cooperative model would to each prompt the analysis sends."""
     prompt = last_user(messages)
+    if messages[0]["content"].startswith("You keep the list of decisions and to-dos"):
+        # One decision, added once: the list it is sent comes back with it after that.
+        added = "Current items:\nnone" not in prompt
+        return json.dumps({"items": [] if added else [{"kind": "decision", "text": "Launch on March 3rd."}]})
     if prompt.startswith("Give this part of a meeting a title"):
         return "<think>short</think>Budget review"
     if prompt.startswith("Transcript so far"):

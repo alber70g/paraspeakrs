@@ -90,6 +90,13 @@ button.sm { padding: 3px 9px; font-size: 13px; }
 .cm { display: grid; grid-template-columns: 62px minmax(0, 1fr); gap: 2px 8px; padding: 4px 8px; margin-bottom: 4px; border-left: 3px solid var(--c); cursor: pointer; border-radius: 0 6px 6px 0; }
 .cm:hover { background: color-mix(in srgb, var(--c) 9%, transparent); }
 .cm .t { color: var(--muted); font: 12px/1.6 var(--mono); }
+.line.flash { background: color-mix(in srgb, var(--accent) 15%, transparent); border-radius: 4px; }
+.it { display: grid; grid-template-columns: 62px minmax(0, 1fr); gap: 2px 8px; padding: 6px 0; border-top: 1px solid var(--line); }
+.it .row { margin-top: 4px; }
+.it input[type=text] { padding: 4px 8px; margin-bottom: 4px; }
+button.link { padding: 0; border: 0; background: none; color: var(--accent); font: 12px/1.6 var(--mono); text-align: left; align-self: start; }
+button.link:hover { text-decoration: underline; }
+#items-list.editing .acts { display: none; }
 [hidden] { display: none !important; }
 </style>
 </head>
@@ -165,6 +172,12 @@ button.sm { padding: 3px 9px; font-size: 13px; }
       <input type="text" id="question-in" placeholder="What did we decide about the budget?">
       <div class="row"><button class="primary" id="ask">Ask</button><span class="muted small" id="asking" hidden>Thinking…</span></div>
       <div id="answers"></div>
+    </div>
+
+    <div id="itembox" hidden>
+      <h2>Decisions and to-dos</h2>
+      <div id="items-list"></div>
+      <div class="row" id="items-actions"></div>
     </div>
 
     <div id="personabox" hidden>
@@ -342,6 +355,8 @@ function running(b) {
   rememberPersonas(currentPersonas);
   show("askbox", "personabox");
   $("commentbox").hidden = false;
+  $("itembox").hidden = false;
+  renderItems();
   renderPersonas();
   renderBrief($("brief-running"), b);
   renderNowNames();
@@ -562,6 +577,7 @@ const handlers = {
     const parts = [];
     if (e.topic != null) parts.push(`topic ${p2(e.topic)}`);
     for (const [k, p] of Object.entries(e.comments || {})) parts.push(`${personaName[k] || k} ${p2(p)}`);
+    if (e.items) parts.push(`decision ${p2(e.items.decision)}`, `to-do ${p2(e.items.todo)}`);
     if (!parts.length) return;
     place(el("div", "dec", parts.join(" · ")), e.at, "dec");
   },
@@ -573,6 +589,10 @@ const handlers = {
     if (e.rerun) node.append(el("span", "tag", "added later"));
     place(node, e.at, "comment");
     listComment(e);
+  },
+  items(e) {
+    items = e.items;
+    renderItems();
   },
   personas(e) {
     currentPersonas = e.personas;
@@ -628,6 +648,105 @@ function listComment(e) {
   for (let c = list.lastElementChild; c && +c.dataset.at > e.at; c = c.previousElementSibling) before = c;
   list.insertBefore(node, before);
 }
+
+// ---- decisions and to-dos ----------------------------------------------------
+
+const GROUPS = [["decision", "Decisions"], ["todo", "To-dos"]];
+let items = [];
+let editingItem = null;
+
+// While an item is being edited the list stays as it is; the latest list is shown once Save or Cancel closes the inputs.
+function renderItems() {
+  if (editingItem) return;
+  const list = $("items-list");
+  list.classList.remove("editing");
+  list.replaceChildren();
+  for (const [kind, label] of GROUPS) {
+    const head = el("p", "small");
+    head.style.margin = kind === "decision" ? "0 0 4px" : "12px 0 4px";
+    head.append(el("b", "", label));
+    list.append(head);
+    const group = items.filter((it) => it.kind === kind);
+    if (!group.length) list.append(el("p", "muted small", "None yet."));
+    for (const it of group) list.append(itemNode(it));
+  }
+}
+
+function itemNode(it) {
+  const node = el("div", "it small");
+  const time = el("button", "link", fmt(it.at));
+  time.title = "Show this moment in the transcript";
+  time.onclick = () => jumpTo(it.at);
+  const body = el("div");
+  const text = el("div", "", it.text);
+  if (it.edited) text.append(el("span", "tag", "edited"));
+  body.append(text);
+  const meta = [it.owner && `Owner: ${it.owner}`, it.due && `Due: ${it.due}`].filter(Boolean).join(" · ");
+  if (meta) body.append(el("div", "muted", meta));
+  const row = el("div", "row acts");
+  button(row, "Edit", async () => editItem(it, body));
+  button(row, "Delete", async () => {
+    if (!confirm(`Delete "${it.text}"?`)) return;
+    await api(`/api/items/${encodeURIComponent(it.id)}`, undefined, "DELETE");
+  });
+  body.append(row);
+  node.append(time, body);
+  return node;
+}
+
+function editItem(it, body) {
+  editingItem = it.id;
+  $("items-list").classList.add("editing");
+  const field = (value, placeholder) => { const i = el("input"); i.type = "text"; i.value = value; i.placeholder = placeholder; return i; };
+  const text = field(it.text, "What was decided or agreed");
+  const owner = field(it.owner, "Owner");
+  const due = field(it.due, "Due, as said");
+  const close = () => { editingItem = null; renderItems(); };
+  const row = el("div", "row");
+  button(row, "Save", async () => {
+    const r = await api(`/api/items/${encodeURIComponent(it.id)}`, { text: text.value.trim(), owner: owner.value.trim(), due: due.value.trim() });
+    items = items.map((x) => (x.id === r.item.id ? r.item : x));
+    close();
+  });
+  button(row, "Cancel", async () => close());
+  body.replaceChildren(text, owner, due, row);
+  text.focus();
+}
+
+// `at` is where the item's batch ended: the line it comes from is the last one starting before that.
+function jumpTo(at) {
+  const lines = [...document.querySelectorAll("#timeline .line")];
+  const target = lines.filter((n) => +n.dataset.t < at).pop() || lines[0];
+  if (!target) return;
+  target.scrollIntoView({ behavior: "smooth", block: "center" });
+  target.classList.add("flash");
+  setTimeout(() => target.classList.remove("flash"), 2000);
+}
+
+function itemsText() {
+  const out = [];
+  for (const [kind, label] of GROUPS) {
+    const group = items.filter((it) => it.kind === kind);
+    out.push(label, ...(group.length ? group.map((it) => {
+      const extra = [it.owner && `owner: ${it.owner}`, it.due && `due: ${it.due}`].filter(Boolean).join(", ");
+      return `- ${it.text}${extra ? ` (${extra})` : ""}`;
+    }) : ["None yet."]), "");
+  }
+  return out.join("\n").trim() + "\n";
+}
+
+button($("items-actions"), "Download .md", async () => {
+  // The download attribute keeps the page open even if the server answers with an error.
+  const a = el("a");
+  a.href = "/api/items.md";
+  a.download = "";
+  a.click();
+});
+button($("items-actions"), "Copy", async (b) => {
+  await navigator.clipboard.writeText(itemsText());
+  b.textContent = "Copied";
+  setTimeout(() => (b.textContent = "Copy"), 1500);
+});
 
 // ---- speakers --------------------------------------------------------------
 

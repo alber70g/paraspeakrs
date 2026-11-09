@@ -19,7 +19,7 @@ jobs:
       - run: uv run pytest -q
 
   build-speakrs:
-    runs-on: macos-14 # arm64
+    runs-on: macos-15 # arm64; GitHub retired the macOS 14 images on 2026-11-02
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v8.3.2

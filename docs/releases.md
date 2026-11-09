@@ -31,7 +31,7 @@ To cut a release:
 Publishing uses PyPI trusted publishing (OIDC), so there is no API token to rotate. The
 `pypi` GitHub environment must be configured as a trusted publisher for both project names.
 
-The sidecar is built on `macos-14` with `--features coreml,blas-static` and
+The sidecar is built on `macos-15` (GitHub retired the macOS 14 images on 2026-11-02) with `--features coreml,blas-static` and
 `--auditwheel=repair`. `blas-static` compiles OpenBLAS into the binary, and the repair step
 vendors gfortran's runtime (`libgfortran`, `libquadmath`, `libgcc_s`) into the wheel — the
 build machine's Homebrew gcc is not on the target machine. The workflow fails the build if

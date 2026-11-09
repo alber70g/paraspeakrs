@@ -31,11 +31,12 @@ def _chat(messages):
 def session(tmp_path):
     decisions = FakeDecisions(lambda key, q, state: 0.9 if "March" in state["new_lines"] else 0.1)
     return LiveSession(
-        ReplaySource("launch.txt", LINES, speed=0, step=20),
+        ReplaySource("launch.txt", LINES, speed=0),
         decisions.client(),
         FakeChat(_chat).client("m"),
         session_dir=tmp_path / "session",
         briefs_dir=tmp_path / "briefs",
+        step=20,
     )
 
 
@@ -52,7 +53,8 @@ def test_the_page_and_state_are_served(session):
         assert "Prepare the meeting" in client.get("/").text
         state = client.get("/api/state").json()
     assert state["state"] == "waiting"
-    assert state["source"] == {"name": "launch.txt", "lines": 3, "seconds": 60, "speed": 0}
+    assert state["source"] == {"kind": "replay", "name": "launch.txt", "lines": 3, "seconds": 60, "speed": 0}
+    assert state["heard"] == 0
     assert state["models"]["decisions"]["url"] == "http://jev.test/v1/decisions"
 
 
@@ -108,7 +110,7 @@ async def test_the_event_stream_replays_the_past_then_follows(session):
 
 def test_cli_live_dispatches_with_the_workspace(monkeypatch, tmp_path):
     seen = []
-    monkeypatch.setattr("paraspeakrs.live.cli.run", lambda args, workspace: seen.append((args, workspace)))
+    monkeypatch.setattr("paraspeakrs.live.cli.run", lambda args, env: seen.append((args, env.workspace_dir)))
     monkeypatch.setenv("PARAKEET_WORKSPACE_DIR", str(tmp_path))
     monkeypatch.setenv("PARASPEAKRS_CHAT_URL", "http://mac.local:8000/v1")
     monkeypatch.setattr(cli.sys, "argv", ["paraspeakrs", "live", "replay", "m.txt", "--speed", "0"])
@@ -119,3 +121,79 @@ def test_cli_live_dispatches_with_the_workspace(monkeypatch, tmp_path):
     assert (args.live_command, args.speed, args.chat_url) == ("replay", 0.0, "http://mac.local:8000/v1")
     assert args.decisions_url == "http://localhost:8080/v1/decisions"
     assert workspace == tmp_path.resolve()
+
+
+class FakeRecording:
+    """A live source: two lines before anyone presses Start, the rest after."""
+
+    live = True
+    speed = 1.0
+
+    def __init__(self) -> None:
+        import threading
+
+        self.go_on = threading.Event()
+
+    def describe(self) -> dict:
+        return {"kind": "recording", "name": "2026-11-09_1430", "speakers": ["Me", "Others"], "state": "recording"}
+
+    async def produce(self, status):
+        import asyncio
+
+        status({"state": "recording", "detail": "2026-11-09_1430"})
+        yield LINES[:2]
+        while not self.go_on.is_set():
+            await asyncio.sleep(0.01)
+        status({"error": "transcribing Others at 00:00:40 failed: boom"})
+        yield LINES[2:]
+        status({"state": "ended", "detail": "2026-11-09_1430"})
+
+
+def test_a_live_source_is_heard_before_the_start_and_analyzed_after(tmp_path):
+    recording = FakeRecording()
+    decisions = FakeDecisions(lambda key, q, state: 0.9 if "March" in state["new_lines"] else 0.1)
+    session = LiveSession(
+        recording,
+        decisions.client(),
+        FakeChat(_chat).client("m"),
+        session_dir=tmp_path / "session",
+        briefs_dir=tmp_path / "briefs",
+        step=30,
+    )
+    with TestClient(create_app(session)) as client:
+        _wait_for(lambda: len(session.heard) == 2)
+        assert session.state == "waiting" and not decisions.requests
+        assert client.get("/api/state").json()["heard"] == 2
+
+        client.post("/api/start", json={"brief": BRIEF})
+        recording.go_on.set()
+        _wait_for(lambda: session.state == "finished")
+
+    types = [e["type"] for e in session.events]
+    assert types[:2] == ["source", "lines"]
+    assert types.index("status") > types.index("lines")  # heard before the meeting was started
+    errors = [e for e in session.events if e["type"] == "error"]
+    assert [(e["where"], e["message"]) for e in errors] == [("transcription", "transcribing Others at 00:00:40 failed: boom")]
+    analyzed = [line for r in decisions.requests if "comment__owner-hawk" in r["questions"] for line in r["state"]["new_lines"].splitlines()]
+    assert len(analyzed) == 3
+    assert [e["state"] for e in session.events if e["type"] == "source"] == ["recording", "ended"]
+
+
+def test_step_batcher_waits_for_a_full_step_or_for_staleness():
+    from paraspeakrs.live.server import StepBatcher
+
+    batcher = StepBatcher(30)
+    assert batcher.push([Line(0, 10, "A", "a")], now=0.0) is None
+    assert batcher.stale(now=29.0, after=30) is None
+    assert [l.text for l in batcher.stale(now=30.0, after=30)] == ["a"]
+    assert batcher.push([Line(10, 20, "A", "b")], now=31.0) is None
+    assert [l.text for l in batcher.push([Line(20, 40, "A", "c")], now=32.0)] == ["b", "c"]
+
+
+def test_a_backlog_is_analyzed_in_pieces_of_at_most_two_minutes():
+    from paraspeakrs.live.server import regroup
+
+    batches = [[Line(i * 30, i * 30 + 30, "A", str(i))] for i in range(10)]
+    chunks = regroup(batches, 120)
+    assert [[l.text for l in c] for c in chunks] == [["0", "1", "2", "3"], ["4", "5", "6", "7"], ["8", "9"]]
+    assert regroup(batches[:1], 120) == batches[:1]

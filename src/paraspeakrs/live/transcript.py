@@ -74,29 +74,20 @@ def _from_json(text: str) -> list[Line]:
     return [Line(u.start, u.end, u.name, u.text) for u in utterances(result)]
 
 
-async def replay(lines: Sequence[Line], *, speed: float, step: float) -> AsyncIterator[list[Line]]:
-    """The lines in batches of about ``step`` seconds of meeting, on a clock ``speed`` times real time.
+async def replay(lines: Sequence[Line], *, speed: float) -> AsyncIterator[Line]:
+    """Each line when the meeting clock, at ``speed`` times real time, passes its end.
 
-    A batch is handed out when the meeting clock passes the end of its last line,
-    as it would be when transcribed live. Time spent by the consumer counts against
-    the clock, so slow analysis falls behind just as it would in a real meeting.
-    ``speed`` 0 hands everything out without waiting.
+    That is when it would be transcribed live. Time the consumer spends counts
+    against the clock, so slow analysis falls behind just as it would in a real
+    meeting. ``speed`` 0 hands everything out without waiting.
     """
     if not lines:
         return
     origin = lines[0].start
     wall_start = time.monotonic()
-    batch: list[Line] = []
-    batch_start = origin
     for line in lines:
-        batch.append(line)
-        if line.end - batch_start >= step:
-            await _wait_until(wall_start, line.end - origin, speed)
-            yield batch
-            batch, batch_start = [], line.end
-    if batch:
-        await _wait_until(wall_start, batch[-1].end - origin, speed)
-        yield batch
+        await _wait_until(wall_start, line.end - origin, speed)
+        yield line
 
 
 async def _wait_until(wall_start: float, meeting_seconds: float, speed: float) -> None:

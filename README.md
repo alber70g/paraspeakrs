@@ -12,7 +12,7 @@ paraspeakrs tui                      # the terminal UI (add --with 'paraspeakrs[
 paraspeakrs mcp                      # the MCP server (add --with 'paraspeakrs[mcp]')
 paraspeakrs agent help               # the file-based flow for coding agents, no MCP needed
 paraspeakrs install-recorder         # macOS: a menu-bar app that records meetings for paraspeakrs
-paraspeakrs live replay meeting.txt  # spike: live analysis with personas, a decision model and a chat model
+paraspeakrs live follow              # spike: analyze the meeting being recorded, live, in a web page
 ```
 
 To install with the optional interfaces in one go:
@@ -961,9 +961,10 @@ Details, file layout and crash recovery: [packages/recorder-macos/README.md](pac
 
 ## Live meeting analysis (spike)
 
-`paraspeakrs live` tries out analysis *during* a meeting. For now it replays a
-finished transcript as if it were live; live audio from the recorder comes later.
-Design and road map: [docs/plans/2026-11-09-live-meeting-analysis.md](docs/plans/2026-11-09-live-meeting-analysis.md).
+`paraspeakrs live` analyzes a meeting *while it happens*. `live follow` transcribes
+the meeting the [recorder](#meeting-recorder-macos) is recording; `live replay` plays a
+finished transcript back as if it were live, to try things out.
+Design: [docs/plans/2026-11-09-live-meeting-analysis.md](docs/plans/2026-11-09-live-meeting-analysis.md).
 
 It needs two local models:
 
@@ -974,8 +975,18 @@ It needs two local models:
 
 ```sh
 paraspeakrs live check                  # one call to each model; finds the decisions path on a 404
-paraspeakrs live replay meeting.txt     # serves and opens http://127.0.0.1:8765/
+paraspeakrs live follow                 # serves and opens http://127.0.0.1:8765/
+paraspeakrs live replay meeting.txt     # the same page, for a finished transcript
 ```
+
+`live follow` waits for a recording in `~/Documents/paraspeakrs-recordings` (or
+takes the one in progress), reads the recorder's two tracks as they are written,
+and transcribes them in pieces of 6 to 20 s, cut at pauses, with a Parakeet model
+that stays loaded. The speaker is the track: `Me` for your microphone and `Others`
+for the call (`--me NAME`, `--others NAME`); the full diarization still runs after
+the recording stops. Lines show up a second or two after someone stops talking,
+also while you are still preparing the meeting. The ASR model must already be on
+disk (`paraspeakrs fetch-models`). The recorder needs no change.
 
 On the page, describe the meeting and the chat model interviews you, one
 multiple-choice question at a time, to work out the **personas** (the viewpoints
@@ -988,10 +999,13 @@ replay:
 - the chat model writes the comments, titles the sections, and answers questions
   you type about the meeting so far.
 
+Anything said before you press Start meeting is analyzed right after, so preparing
+during the first minutes of the meeting costs nothing.
+
 Every probability is shown under the batch it belongs to, to help pick thresholds
 for your models (`--topic-threshold`, default 0.6; `--comment-threshold`, default
-0.5). `--speed` sets the replay speed (default 10× real time, 0 for no waiting) and
-`--brief` starts from a saved brief. URLs and models can also come from
+0.5). For `replay`, `--speed` sets the speed (default 10× real time, 0 for no
+waiting). `--brief` starts from a saved brief. URLs and models can also come from
 `PARASPEAKRS_DECISIONS_URL`, `PARASPEAKRS_DECISIONS_MODEL`, `PARASPEAKRS_CHAT_URL` and
 `PARASPEAKRS_CHAT_MODEL`; API keys only from `PARASPEAKRS_DECISIONS_API_KEY` and
 `PARASPEAKRS_CHAT_API_KEY`.

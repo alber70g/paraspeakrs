@@ -16,6 +16,11 @@ All notable changes to `paraspeakrs` are documented here. The format follows
   persona whether new lines deserve a comment; the chat model writes the comments
   and answers questions about the meeting so far. `live check` tests both model
   endpoints. Design: `docs/plans/2026-11-09-live-meeting-analysis.md`.
+- **`paraspeakrs live follow`: the same analysis on the meeting being recorded.** It
+  reads the recorder's microphone and system-audio tracks while they are written,
+  transcribes them in pieces cut at pauses with a Parakeet model that stays loaded,
+  and shows each line a second or two after it is spoken. The speaker is the track
+  (`Me`, `Others`; `--me`, `--others`). The recorder needs no change.
 
 ## [0.10.0] — 2026-11-04
 

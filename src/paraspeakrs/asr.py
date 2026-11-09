@@ -33,6 +33,13 @@ class SherpaParakeetAsr:
         result = self._decode(samples, sample_rate)
         return getattr(result, "text", str(result)).strip()
 
+    def transcribe_samples(self, samples, sample_rate: int) -> AsrSegment:
+        """Text and word timings, from samples already in memory (`live follow`)."""
+        result = self._decode(samples, sample_rate)
+        text = getattr(result, "text", str(result)).strip()
+        end = float(len(samples)) / float(sample_rate)
+        return AsrSegment(text=text, start=0.0, end=end, words=_extract_words(result))
+
     def load(self):
         """Load the model now rather than on the first transcription."""
         return self._load_recognizer(_import_sherpa_onnx())

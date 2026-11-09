@@ -171,7 +171,7 @@ def _main() -> None:
     if args.command == "live":
         from .live.cli import run as live_run
 
-        live_run(args, env.workspace_dir)
+        live_run(args, env)
         return
     if args.command == "dictate":
         from . import dictate

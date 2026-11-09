@@ -25,6 +25,7 @@ header { position: sticky; top: 0; z-index: 2; display: flex; flex-wrap: wrap; g
 header h1 { font-size: 18px; margin: 0; }
 .pill { font-size: 12px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
 .pill.running { color: var(--accent); border-color: var(--accent); }
+.rec { color: var(--error); font-weight: 600; }
 .meta { color: var(--muted); font-size: 13px; }
 main { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 16px; padding: 16px; max-width: 1280px; margin: 0 auto; }
 @media (max-width: 860px) { main { grid-template-columns: minmax(0, 1fr); } aside { order: -1; } }
@@ -44,7 +45,7 @@ textarea.json { font: 12px/1.4 var(--mono); min-height: 260px; }
 .options { display: flex; flex-direction: column; gap: 6px; margin: 8px 0; }
 .options button { text-align: left; }
 .error { color: var(--error); background: var(--error-bg); border-radius: 8px; padding: 8px 10px; font-size: 13px; margin-bottom: 8px; overflow-wrap: anywhere; }
-#timeline:empty::before { content: "The transcript appears here once the meeting starts."; color: var(--muted); }
+#timeline:empty::before { content: "The transcript appears here as it comes in."; color: var(--muted); }
 .sec { margin: 18px 0 6px; padding-top: 10px; border-top: 1px solid var(--line); }
 .sec:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
 .sec .title { font-weight: 600; }
@@ -72,6 +73,7 @@ details summary { cursor: pointer; color: var(--muted); font-size: 13px; }
   <h1 id="title">Live meeting</h1>
   <span class="pill" id="status">waiting</span>
   <span class="meta" id="clock"></span>
+  <span class="meta" id="recorder"></span>
   <span class="meta" id="source"></span>
   <label class="meta small"><input type="checkbox" id="show-dec" checked> show decisions</label>
 </header>
@@ -352,6 +354,14 @@ const handlers = {
     $("answers").prepend(qa);
   },
   error(e) { showError(`${e.where}: ${e.message}`); },
+  source(e) {
+    const node = $("recorder");
+    node.className = "meta";
+    if (e.state === "recording") { node.textContent = `● recording ${e.detail}`; node.classList.add("rec"); }
+    else if (e.state === "waiting") node.textContent = "waiting for a recording: start one in the recorder";
+    else if (e.state === "ended") node.textContent = `recording ${e.detail} ended`;
+    else node.textContent = e.detail || e.state;
+  },
 };
 
 async function ask() {
@@ -369,8 +379,12 @@ $("show-dec").onchange = (e) => document.body.classList.toggle("hide-dec", !e.ta
 (async function init() {
   try {
     const state = await api("/api/state");
-    sourceSeconds = state.source.seconds;
-    $("source").textContent = `${state.source.name} · ${state.source.lines} lines · ${state.source.speed}× · chat ${state.models.chat.model || "(first listed)"} · decisions ${state.models.decisions.model}`;
+    const src = state.source;
+    sourceSeconds = src.seconds || 0;
+    const models = `chat ${state.models.chat.model || "(first listed)"} · decisions ${state.models.decisions.model}`;
+    $("source").textContent = src.kind === "replay"
+      ? `${src.name} · ${src.lines} lines · ${src.speed}× · ${models}`
+      : `${src.speakers.join(" + ")} · ${models}`;
     if (state.state === "waiting") {
       if (state.brief) showBrief(state.brief); else show("describe");
       loadSaved();

@@ -53,9 +53,9 @@ def _lines(n: int, every: float = 10.0, speaker: str = "Anna") -> list[Line]:
     return [Line(i * every, i * every + every, speaker, f"point {i}") for i in range(n)]
 
 
-async def test_replay_hands_out_batches_of_about_one_step():
-    batches = [b async for b in replay(_lines(7), speed=0, step=30)]
-    assert [len(b) for b in batches] == [3, 3, 1]
+async def test_replay_hands_out_every_line_in_order():
+    lines = _lines(4)
+    assert [line async for line in replay(lines, speed=0)] == lines
 
 
 def _analyzer(decisions: FakeDecisions, chat: FakeChat, **thresholds) -> tuple[Analyzer, list[dict]]:

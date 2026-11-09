@@ -5,6 +5,25 @@ Autonomous decisions taken without waiting for review. Newest first.
 Each entry carries its review status. **Accepted** means the user reviewed it
 after the fact and let it stand; an entry stays **Pending** until they do.
 
+## 2026-11-09 — Live audio: read the recorder's growing CAF tracks, do not change the recorder
+
+*Status: pending.*
+
+The plan recommended that the recorder write extra WAV pieces for live transcription,
+and rated reading the growing `.caf` files as fragile. Looking closer: CAF allows a
+data chunk of size -1 ("to the end of the file") exactly so a file can be read while
+it is written, and the recorder's README already relies on the tracks being usable
+after a crash. This session has no macOS and no Swift compiler.
+
+- **Recorder writes WAV pieces, as planned.** Two copies of the audio on disk; a Swift
+  change that could not be built or tested here, and a recorder reinstall for every user.
+- **Read the CAF tracks while they grow.** ← chosen. No recorder change; tested with
+  the real Parakeet model on tracks written the way the recorder writes them. The
+  reader takes whole frames up to the end of the file and re-reads the declared size
+  on every call, so it works whether the writer leaves the size at -1, 0 or updates it.
+  **Unverified:** that macOS writes the audio to disk while recording, rather than at
+  close, next to the real recorder app.
+
 ## 2026-11-09 — Live analysis: where the decision model is assumed to listen
 
 *Status: pending.*

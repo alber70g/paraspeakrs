@@ -1,9 +1,12 @@
 # Live meeting analysis: personas, a decision model, and questions during the meeting
 
-Date: 2026-11-09. Status: replay spike built (`paraspeakrs live`). Live audio not started.
-Verified: unit tests against fake models, and a browser run of the whole flow (questionnaire,
-brief, replay, comments, a question) against fake servers on ports 8080 and 8000.
-Not verified: the real models on the MacBook Pro M5.
+Date: 2026-11-09. Status: built as `paraspeakrs live replay` (a finished transcript) and
+`paraspeakrs live follow` (the recording in progress).
+Verified: unit tests against fake models; a browser run of the whole replay flow against fake
+servers on ports 8080 and 8000; `live follow` with the real Parakeet INT8 model on growing CAF
+tracks written the way the recorder writes them (English, French, German and Spanish speech).
+Not verified: the real decision and chat models on the MacBook Pro M5, and `live follow` next to
+the real recorder app.
 
 ## Goal
 
@@ -21,8 +24,7 @@ While a meeting is still going on:
 Everything runs on local models: a decision model that speaks the JEV Decisions API at
 `localhost:8080`, and an OpenAI-compatible chat model at `localhost:8000/v1`.
 
-Out of scope for the spike: live audio (see [Toward live audio](#toward-live-audio)), more than one
-meeting per process, authentication, editing comments, exporting a report.
+Out of scope for the spike: more than one meeting per process, authentication, editing comments, exporting a report.
 
 ## Decisions taken
 
@@ -206,7 +208,8 @@ API: `GET /api/state`, `POST /api/intake`, `GET /api/briefs`, `POST /api/start`,
 
 ```sh
 paraspeakrs live check                         # one call to each model, says what works
-paraspeakrs live replay meeting.txt            # opens http://127.0.0.1:8765/
+paraspeakrs live follow                        # the recording in progress; opens http://127.0.0.1:8765/
+paraspeakrs live replay meeting.txt            # a finished transcript, on the same page
 paraspeakrs live replay meeting.txt --speed 1 --brief ~/.local/share/paraspeakrs/live/briefs/launch-planning-sync.json
 ```
 
@@ -219,24 +222,62 @@ and `PARASPEAKRS_CHAT_MODEL`; keys only through `PARASPEAKRS_DECISIONS_API_KEY` 
 A transcript is any `.txt` paraspeakrs writes (`[hh:mm:ss] Name: text`, frontmatter allowed) or
 the JSON of `paraspeakrs run`.
 
-## Toward live audio
+## Live audio
 
-The analyzer takes lines and does not care where they come from, so live audio only needs a
-source that produces lines during the recording. Today the recorder writes two mono `.caf` tracks
-and paraspeakrs transcribes and diarizes after the recording stops.
+`paraspeakrs live follow` transcribes the meeting the recorder is recording. The analyzer
+takes lines and does not care where they come from; only the source is new.
+
+```sh
+paraspeakrs live follow                 # the recording in progress in ~/Documents/paraspeakrs-recordings,
+                                        # or the next one to start there
+paraspeakrs live follow --me Albert     # name the microphone speaker
+```
+
+How it works (`live/caf.py`, `live/listen.py`):
+
+1. **It reads the recorder's own tracks while they grow.** While recording, the recorder writes
+   `<name>.mic.caf` and `<name>.system.caf`, uncompressed 16-bit 48 kHz, appending every 100 ms.
+   CAF is made for this: the size of its final `data` chunk may be -1, "to the end of the file",
+   while it is written. The reader takes the whole frames between the start of the audio and the
+   end of the file, and keeps its handle open, so it can read the last of it after the recorder
+   deletes the tracks.
+2. **Each track is cut into pieces of 6 to 20 s**, at the first pause of 0.5 s after 6 s, or at
+   the quietest 0.2 s before 20 s, the same cut `paraspeakrs dictate` uses. Silent pieces are
+   skipped.
+3. **A Parakeet model that stays loaded transcribes each piece** (one worker thread), after the
+   48 kHz audio is filtered down to 16 kHz. The speaker is the track: `Me` for the microphone,
+   `Others` for the system audio (`--me`, `--others`). Diarization still runs on the whole
+   recording after the stop, as it always has.
+4. **Lines are handed out in time order across both tracks.** A line is final once both tracks
+   are transcribed past its start. The system track does not grow while nothing plays (the tap
+   delivers nothing then), so a track that has not grown for 1.5 s counts as silent up to 1 s
+   behind the other.
+5. **The end** is the `.m4a` appearing or the tracks being deleted, which is how the recorder
+   finishes, or 30 s without either track growing (a crash). What is left is transcribed first.
+
+Lines are shown on the page from the moment they are transcribed, also while you are still in
+the questionnaire. Analysis starts when you press Start meeting. Anything heard before that is
+analyzed in pieces of at most 2 minutes, so sections still split where the topic changes.
+
+Measured in the test run (Linux CPU, INT8 model): a line reached the page 1 to 2 s after its
+speaker stopped.
+
+### Why not WAV pieces from the recorder
+
+An earlier version of this plan proposed that the recorder write extra WAV pieces. Reading the CAF tracks needs no
+recorder change at all, so a recorder that is already installed works as it is, and there is no
+second copy of the audio on disk. This session had no macOS and no Swift compiler, so a recorder
+change could not have been built or tested here either. The risk moves to one assumption: that
+macOS writes the CAF audio to disk as it records. The recorder's README relies on the same thing
+when it says the tracks survive a crash. This has not been checked next to the real recorder.
+
+### Later
 
 | Option | For | Against |
 |---|---|---|
-| **A. The recorder also writes 20–30 s WAV pieces per channel while recording; a warm paraspeakrs process transcribes each piece as it lands. Speaker = channel: left is you (microphone), right is everyone else (system audio).** ← recommended | Reuses what exists: the piece cutting at quiet points and the warm model of `paraspeakrs dictate --serve`, and the recorder's track writer. No new model. Full diarization still runs after the stop, as now. | Everyone on the call is one "speaker" until the meeting ends. |
-| B. paraspeakrs reads the growing `.caf` files | No recorder change. | ExtAudioFile finalizes the file on close; reading mid-write is fragile. |
-| C. A streaming ASR model | Lowest latency. | A different model from Parakeet TDT, of unknown quality on Dutch; more work. |
-| D. Live diarization on rolling windows | Real speaker names during the meeting. | Labels jump between windows; needs matching against the voice cache. Worth it after A works. |
-
-With A a line reaches the analyzer 20–30 s after it is spoken, plus one analysis step. That is
-the same scale as the 30 s batches, so it fits the design.
-
-The page would then be opened by the recorder (or `paraspeakrs live follow <recording dir>`)
-instead of by `live replay`.
+| Start `live follow` from the recorder (a toggle in the panel) | One click instead of a terminal command. | Swift change; needs a Mac to build and test. |
+| Live diarization on rolling windows | Real speaker names during the meeting instead of "Others". | Labels jump between windows; needs matching against the voice cache. |
+| A streaming ASR model | Lower latency than pieces. | A different model of unknown quality on Dutch; pieces are already at 1 to 2 s. |
 
 ## Risks and open questions
 
@@ -260,7 +301,6 @@ instead of by `live replay`.
 ## Next steps
 
 1. Run `live check` and a replay of a real Dutch meeting on the MacBook; set thresholds.
-2. Decide on option A for live audio, then add the WAV pieces to the recorder and a `live follow`
-   source.
-3. Depending on what the replays show: a `score` question for how urgent a comment is, or
-   comments that can be dismissed from the page.
+2. Run `live follow` during a real recording and confirm lines arrive while it records.
+3. Depending on what that shows: start `live follow` from the recorder, a `score` question for how
+   urgent a comment is, or comments that can be dismissed from the page.

@@ -135,6 +135,9 @@ def _main() -> None:
     agent_apply.add_argument("out_dir", type=Path)
     agent_apply.add_argument("--dry-run", action="store_true", help="report what would change, change nothing")
     agent_apply.add_argument("--json", action="store_true", help=JSON_HELP)
+    from .live.cli import add_parser as add_live_parser
+
+    add_live_parser(subparsers)
     args = parser.parse_args()
 
     if args.command == "agent" and args.agent_command == "help":
@@ -164,6 +167,11 @@ def _main() -> None:
                 f"{exc}\n\nReport it on GitHub; the link fills in the title and this log. "
                 f"Check the text before you submit:\n{recorder_install.issue_url(str(exc))}"
             ) from exc
+        return
+    if args.command == "live":
+        from .live.cli import run as live_run
+
+        live_run(args, env.workspace_dir)
         return
     if args.command == "dictate":
         from . import dictate

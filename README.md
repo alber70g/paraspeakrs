@@ -12,6 +12,7 @@ paraspeakrs tui                      # the terminal UI (add --with 'paraspeakrs[
 paraspeakrs mcp                      # the MCP server (add --with 'paraspeakrs[mcp]')
 paraspeakrs agent help               # the file-based flow for coding agents, no MCP needed
 paraspeakrs install-recorder         # macOS: a menu-bar app that records meetings for paraspeakrs
+paraspeakrs live replay meeting.txt  # spike: live analysis with personas, a decision model and a chat model
 ```
 
 To install with the optional interfaces in one go:
@@ -957,6 +958,47 @@ speaker and everyone else is an `R_` speaker. The job shows up in `paraspeakrs t
   signed ad hoc. `--sign IDENTITY` picks a certificate.
 
 Details, file layout and crash recovery: [packages/recorder-macos/README.md](packages/recorder-macos/README.md).
+
+## Live meeting analysis (spike)
+
+`paraspeakrs live` tries out analysis *during* a meeting. For now it replays a
+finished transcript as if it were live; live audio from the recorder comes later.
+Design and road map: [docs/plans/2026-11-09-live-meeting-analysis.md](docs/plans/2026-11-09-live-meeting-analysis.md).
+
+It needs two local models:
+
+- a **decision model** that speaks the [JEV Decisions API](https://openrouter.ai/docs/guides/community/jev.md)
+  (TypeSafe's typed yes/no, choice and score answers with probabilities), by default at
+  `http://localhost:8080/v1/decisions`;
+- an **OpenAI-compatible chat model**, by default at `http://localhost:8000/v1`.
+
+```sh
+paraspeakrs live check                  # one call to each model; finds the decisions path on a 404
+paraspeakrs live replay meeting.txt     # serves and opens http://127.0.0.1:8765/
+```
+
+On the page, describe the meeting and the chat model interviews you, one
+multiple-choice question at a time, to work out the **personas** (the viewpoints
+that comment), the **participants**, and for each persona what deserves a comment
+and what does not. That becomes a brief you can edit before you start. During the
+replay:
+
+- the decision model cuts the transcript into sections when the topic changes,
+  and asks every persona on each ~30 s batch whether the new lines deserve a comment;
+- the chat model writes the comments, titles the sections, and answers questions
+  you type about the meeting so far.
+
+Every probability is shown under the batch it belongs to, to help pick thresholds
+for your models (`--topic-threshold`, default 0.6; `--comment-threshold`, default
+0.5). `--speed` sets the replay speed (default 10× real time, 0 for no waiting) and
+`--brief` starts from a saved brief. URLs and models can also come from
+`PARASPEAKRS_DECISIONS_URL`, `PARASPEAKRS_DECISIONS_MODEL`, `PARASPEAKRS_CHAT_URL` and
+`PARASPEAKRS_CHAT_MODEL`; API keys only from `PARASPEAKRS_DECISIONS_API_KEY` and
+`PARASPEAKRS_CHAT_API_KEY`.
+
+Each run keeps its brief and an `events.jsonl` of everything that happened in
+`~/.local/share/paraspeakrs/live/sessions/`; briefs are also kept in `live/briefs/`
+and offered again on the next run.
 
 ## Stereo handling
 

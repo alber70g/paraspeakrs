@@ -1,0 +1,384 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Live meeting</title>
+<style>
+:root {
+  --bg: #f7f7f5; --panel: #ffffff; --text: #1d1d1b; --muted: #6b6b66; --line: #e3e3de;
+  --accent: #2f5bd3; --accent-text: #ffffff; --error: #b42318; --error-bg: #fdecea;
+  --p1: #2f5bd3; --p2: #b5470b; --p3: #127a52; --p4: #8a2fb8; --p5: #a3166b; --p6: #5b6b0f;
+  --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #161615; --panel: #1f1f1d; --text: #ececea; --muted: #9a9a94; --line: #34342f;
+    --accent: #7b9cff; --accent-text: #0d1430; --error: #ff8a80; --error-bg: #3a1714;
+    --p1: #7b9cff; --p2: #ffa36b; --p3: #4fd1a1; --p4: #cf8cff; --p5: #ff7cc0; --p6: #c5d64a;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+header { position: sticky; top: 0; z-index: 2; display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: baseline;
+  padding: 12px 16px; background: var(--panel); border-bottom: 1px solid var(--line); }
+header h1 { font-size: 18px; margin: 0; }
+.pill { font-size: 12px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+.pill.running { color: var(--accent); border-color: var(--accent); }
+.meta { color: var(--muted); font-size: 13px; }
+main { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 16px; padding: 16px; max-width: 1280px; margin: 0 auto; }
+@media (max-width: 860px) { main { grid-template-columns: minmax(0, 1fr); } aside { order: -1; } }
+aside > div, #timeline { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
+aside { display: flex; flex-direction: column; gap: 16px; align-self: start; position: sticky; top: 64px; max-height: calc(100vh - 80px); overflow: auto; }
+@media (max-width: 860px) { aside { position: static; max-height: none; } }
+h2 { font-size: 15px; margin: 0 0 8px; }
+p { margin: 0 0 8px; }
+.muted { color: var(--muted); }
+.small { font-size: 13px; }
+button { font: inherit; padding: 6px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); color: var(--text); cursor: pointer; }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+button:disabled { opacity: .5; cursor: default; }
+textarea, input[type=text], select { width: 100%; font: inherit; padding: 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--text); }
+textarea.json { font: 12px/1.4 var(--mono); min-height: 260px; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.options { display: flex; flex-direction: column; gap: 6px; margin: 8px 0; }
+.options button { text-align: left; }
+.error { color: var(--error); background: var(--error-bg); border-radius: 8px; padding: 8px 10px; font-size: 13px; margin-bottom: 8px; overflow-wrap: anywhere; }
+#timeline:empty::before { content: "The transcript appears here once the meeting starts."; color: var(--muted); }
+.sec { margin: 18px 0 6px; padding-top: 10px; border-top: 1px solid var(--line); }
+.sec:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
+.sec .title { font-weight: 600; }
+.sec .when { color: var(--muted); font-size: 12px; margin-left: 6px; }
+.line { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 8px; padding: 1px 0; }
+.line .t { color: var(--muted); font: 12px/1.9 var(--mono); }
+.line .who { font-weight: 600; margin-right: 4px; }
+.comment { margin: 6px 0 8px 72px; padding: 6px 10px; border-left: 3px solid var(--c); background: color-mix(in srgb, var(--c) 9%, transparent); border-radius: 0 8px 8px 0; }
+@media (max-width: 600px) { .comment { margin-left: 0; } .line { grid-template-columns: 52px minmax(0, 1fr); } }
+.comment b { color: var(--c); }
+.dec { margin-left: 72px; font: 11px/1.6 var(--mono); color: var(--muted); }
+body.hide-dec .dec { display: none; }
+.prob { font: 11px var(--mono); color: var(--muted); margin-left: 6px; }
+.persona { border-left: 3px solid var(--c); padding-left: 8px; margin-bottom: 10px; }
+.persona b { color: var(--c); }
+.qa { border-top: 1px solid var(--line); padding-top: 8px; margin-top: 8px; }
+.qa .q { font-weight: 600; }
+.qa .a { white-space: pre-wrap; }
+details summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+[hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="title">Live meeting</h1>
+  <span class="pill" id="status">waiting</span>
+  <span class="meta" id="clock"></span>
+  <span class="meta" id="source"></span>
+  <label class="meta small"><input type="checkbox" id="show-dec" checked> show decisions</label>
+</header>
+<main>
+  <div id="timeline"></div>
+  <aside>
+    <div id="errors" hidden></div>
+
+    <div id="describe">
+      <h2>Prepare the meeting</h2>
+      <p class="muted small">Describe the meeting. A chat model then asks a few questions to work out which viewpoints to watch it from and what deserves a comment.</p>
+      <textarea id="note" rows="4" placeholder="Weekly sync with the design team about the onboarding redesign. I want to catch scope creep and unclear owners."></textarea>
+      <div class="row">
+        <button class="primary" id="begin">Start questionnaire</button>
+        <button id="manual">Write the brief myself</button>
+      </div>
+      <div id="saved-wrap" hidden>
+        <p class="muted small" style="margin-top:12px">Or reuse a saved brief:</p>
+        <select id="saved"><option value="">Choose…</option></select>
+      </div>
+    </div>
+
+    <div id="interview" hidden>
+      <h2 id="qnum">Question</h2>
+      <p id="question"></p>
+      <p class="muted small" id="why"></p>
+      <div class="options" id="options"></div>
+      <input type="text" id="own" placeholder="Or answer in your own words">
+      <div class="row">
+        <button class="primary" id="send">Send</button>
+        <button id="finish">Write the brief now</button>
+      </div>
+      <p class="muted small" id="thinking" hidden>Thinking…</p>
+    </div>
+
+    <div id="briefbox" hidden>
+      <h2>Brief</h2>
+      <div id="brief-view"></div>
+      <details id="brief-edit">
+        <summary>Edit as JSON</summary>
+        <textarea class="json" id="brief-json" spellcheck="false"></textarea>
+      </details>
+      <div class="row">
+        <button class="primary" id="start">Start meeting</button>
+      </div>
+    </div>
+
+    <div id="askbox" hidden>
+      <h2>Ask about the meeting</h2>
+      <input type="text" id="question-in" placeholder="What did we decide about the budget?">
+      <div class="row"><button class="primary" id="ask">Ask</button><span class="muted small" id="asking" hidden>Thinking…</span></div>
+      <div id="answers"></div>
+    </div>
+
+    <div id="personabox" hidden>
+      <h2>Personas</h2>
+      <div id="personas"></div>
+      <details><summary>Brief</summary><div id="brief-running" class="small"></div></details>
+    </div>
+  </aside>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
+const fmt = (s) => { s = Math.max(0, Math.floor(s)); const h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60, x = s % 60; return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(x).padStart(2, "0")}`; };
+const p2 = (p) => (p == null ? "–" : p.toFixed(2));
+
+let history = [];
+let brief = null;
+let personaColor = {};
+let personaName = {};
+let sourceSeconds = 0;
+let started = false;
+
+async function api(path, body) {
+  const res = await fetch(path, body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail || data));
+  return data;
+}
+
+function showError(message) {
+  const box = $("errors");
+  box.hidden = false;
+  const item = el("div", "error", message);
+  box.prepend(item);
+  while (box.children.length > 4) box.lastChild.remove();
+}
+
+function show(...ids) {
+  for (const id of ["describe", "interview", "briefbox", "askbox", "personabox"]) $(id).hidden = !ids.includes(id);
+}
+
+// ---- preparing -------------------------------------------------------------
+
+async function turn() {
+  $("thinking").hidden = false;
+  for (const b of document.querySelectorAll("#interview button")) b.disabled = true;
+  try {
+    const data = await api("/api/intake", { history });
+    history = data.history;
+    if (data.brief) return showBrief(data.brief);
+    renderQuestion(data.question);
+  } catch (e) {
+    showError(`Questionnaire: ${e.message}`);
+  } finally {
+    $("thinking").hidden = true;
+    for (const b of document.querySelectorAll("#interview button")) b.disabled = false;
+  }
+}
+
+function renderQuestion(q) {
+  show("interview");
+  $("qnum").textContent = `Question ${history.filter((m) => m.role === "assistant").length}`;
+  $("question").textContent = q.question;
+  $("why").textContent = q.why || "";
+  const opts = $("options");
+  opts.replaceChildren();
+  for (const option of q.options) {
+    const b = el("button", "", option);
+    b.onclick = () => answer(option);
+    opts.append(b);
+  }
+  $("own").value = "";
+  $("own").focus();
+}
+
+function answer(text) {
+  if (!text.trim()) return;
+  history.push({ role: "user", content: text.trim() });
+  turn();
+}
+
+$("begin").onclick = () => {
+  const note = $("note").value.trim();
+  if (!note) return $("note").focus();
+  history = [{ role: "user", content: `The meeting to prepare: ${note}` }];
+  show("interview");
+  $("question").textContent = "";
+  $("options").replaceChildren();
+  turn();
+};
+$("send").onclick = () => answer($("own").value);
+$("own").addEventListener("keydown", (e) => { if (e.key === "Enter") answer($("own").value); });
+$("finish").onclick = () => answer("Write the brief now with what you know.");
+$("manual").onclick = () => showBrief({
+  title: "Meeting", language: "", purpose: "", context: "", section_rule: "", agenda: [], participants: [],
+  personas: [{ name: "Critical friend", viewpoint: "", comment_when: "A decision is made without an owner or a date.", skip_when: "", style: "" }],
+});
+$("saved").onchange = (e) => { const item = savedBriefs[e.target.value]; if (item) showBrief(item.brief); };
+
+let savedBriefs = [];
+async function loadSaved() {
+  try {
+    savedBriefs = await api("/api/briefs");
+    if (!savedBriefs.length) return;
+    $("saved-wrap").hidden = false;
+    savedBriefs.forEach((b, i) => { const o = el("option", "", b.brief.title || b.name); o.value = i; $("saved").append(o); });
+  } catch (e) { /* no saved briefs is fine */ }
+}
+
+function showBrief(b) {
+  brief = b;
+  show("briefbox");
+  $("brief-json").value = JSON.stringify(b, null, 2);
+  renderBrief($("brief-view"), b);
+}
+
+$("brief-json").addEventListener("input", () => {
+  try { brief = JSON.parse($("brief-json").value); renderBrief($("brief-view"), brief); } catch (e) { /* keep editing */ }
+});
+
+function renderBrief(target, b) {
+  target.replaceChildren();
+  const add = (label, value) => { if (!value) return; const p = el("p", "small"); p.append(el("b", "", `${label}: `), document.createTextNode(value)); target.append(p); };
+  add("Meeting", b.title);
+  add("Purpose", b.purpose);
+  add("Language", b.language);
+  add("New section when", b.section_rule);
+  if (b.participants && b.participants.length) add("Participants", b.participants.map((p) => p.name + (p.role ? ` (${p.role})` : "")).join(", "));
+  (b.personas || []).forEach((p, i) => {
+    const d = el("div", "persona small");
+    d.style.setProperty("--c", `var(--p${(i % 6) + 1})`);
+    d.append(el("b", "", p.name));
+    if (p.viewpoint) d.append(el("div", "muted", p.viewpoint));
+    d.append(el("div", "", `Comments when: ${p.comment_when}`));
+    if (p.skip_when) d.append(el("div", "muted", `Stays quiet when: ${p.skip_when}`));
+    target.append(d);
+  });
+  if (!(b.personas || []).length) target.append(el("p", "muted small", "No personas: the meeting gets sections and answers, but no comments."));
+}
+
+$("start").onclick = async () => {
+  let b;
+  try { b = JSON.parse($("brief-json").value); } catch (e) { return showError(`The brief is not valid JSON: ${e.message}`); }
+  $("start").disabled = true;
+  try { await api("/api/start", { brief: b }); } catch (e) { showError(`Start: ${e.message}`); } finally { $("start").disabled = false; }
+};
+
+// ---- the meeting -----------------------------------------------------------
+
+function running(b) {
+  started = true;
+  brief = b;
+  $("title").textContent = b.title || "Live meeting";
+  personaColor = {}; personaName = {};
+  (b.personas || []).forEach((p, i) => { personaColor[p.key] = `var(--p${(i % 6) + 1})`; personaName[p.key] = p.name; });
+  show("askbox", "personabox");
+  const list = $("personas");
+  list.replaceChildren();
+  (b.personas || []).forEach((p) => {
+    const d = el("div", "persona small");
+    d.style.setProperty("--c", personaColor[p.key]);
+    d.append(el("b", "", p.name), el("div", "muted", p.comment_when));
+    list.append(d);
+  });
+  renderBrief($("brief-running"), b);
+}
+
+// At equal times, what was said about the batch that just ended comes before the next section and line.
+const ORDER = { dec: 0, comment: 1, sec: 2, line: 3 };
+function place(node, t, kind) {
+  node.dataset.t = t; node.dataset.o = ORDER[kind];
+  const tl = $("timeline");
+  const stick = window.innerHeight + window.scrollY >= document.body.scrollHeight - 80;
+  let before = null;
+  for (let c = tl.lastElementChild; c; c = c.previousElementSibling) {
+    const ct = +c.dataset.t, co = +c.dataset.o;
+    if (ct < t || (ct === t && co <= ORDER[kind])) break;
+    before = c;
+  }
+  tl.insertBefore(node, before);
+  if (stick) window.scrollTo(0, document.body.scrollHeight);
+}
+
+const handlers = {
+  status(e) {
+    $("status").textContent = e.state;
+    $("status").className = `pill ${e.state}`;
+    if (e.brief) running(e.brief);
+  },
+  lines(e) {
+    for (const line of e.lines) {
+      const row = el("div", "line");
+      const body = el("div");
+      body.append(el("span", "who", `${line.speaker}:`), document.createTextNode(line.text));
+      row.append(el("span", "t", fmt(line.start)), body);
+      place(row, line.start, "line");
+      $("clock").textContent = `${fmt(line.end)}${sourceSeconds ? " / " + fmt(sourceSeconds) : ""}`;
+    }
+  },
+  section(e) {
+    const node = el("div", "sec");
+    node.id = `sec-${e.section}`;
+    node.append(el("span", "title", `Section ${e.section + 1}`), el("span", "when", `${fmt(e.start)}${e.reason === "topic" ? " · topic changed" : e.reason === "length" ? " · long section split" : ""}`));
+    place(node, e.start, "sec");
+  },
+  title(e) {
+    const node = document.querySelector(`#sec-${e.section} .title`);
+    if (node) node.textContent = `${e.section + 1}. ${e.title}`;
+  },
+  decision(e) {
+    const parts = [];
+    if (e.topic != null) parts.push(`topic ${p2(e.topic)}`);
+    for (const [k, p] of Object.entries(e.comments || {})) parts.push(`${personaName[k] || k} ${p2(p)}`);
+    if (!parts.length) return;
+    place(el("div", "dec", parts.join(" · ")), e.at, "dec");
+  },
+  comment(e) {
+    const node = el("div", "comment");
+    node.style.setProperty("--c", personaColor[e.persona] || "var(--accent)");
+    node.append(el("b", "", `${e.name} `), document.createTextNode(e.text), el("span", "prob", `p ${p2(e.p)}`));
+    place(node, e.at, "comment");
+  },
+  answer(e) {
+    const qa = el("div", "qa");
+    qa.append(el("div", "q", e.question), el("div", "a", e.answer), el("div", "muted small", `at ${fmt(e.at)}`));
+    $("answers").prepend(qa);
+  },
+  error(e) { showError(`${e.where}: ${e.message}`); },
+};
+
+async function ask() {
+  const q = $("question-in").value.trim();
+  if (!q) return;
+  $("ask").disabled = true; $("asking").hidden = false;
+  try { await api("/api/ask", { question: q }); $("question-in").value = ""; }
+  catch (e) { showError(`Ask: ${e.message}`); }
+  finally { $("ask").disabled = false; $("asking").hidden = true; }
+}
+$("ask").onclick = ask;
+$("question-in").addEventListener("keydown", (e) => { if (e.key === "Enter") ask(); });
+$("show-dec").onchange = (e) => document.body.classList.toggle("hide-dec", !e.target.checked);
+
+(async function init() {
+  try {
+    const state = await api("/api/state");
+    sourceSeconds = state.source.seconds;
+    $("source").textContent = `${state.source.name} · ${state.source.lines} lines · ${state.source.speed}× · chat ${state.models.chat.model || "(first listed)"} · decisions ${state.models.decisions.model}`;
+    if (state.state === "waiting") {
+      if (state.brief) showBrief(state.brief); else show("describe");
+      loadSaved();
+    }
+  } catch (e) { showError(`Cannot load the session: ${e.message}`); }
+  const events = new EventSource("/api/events");
+  events.onmessage = (m) => { const e = JSON.parse(m.data); (handlers[e.type] || (() => {}))(e); };
+})();
+</script>
+</body>
+</html>

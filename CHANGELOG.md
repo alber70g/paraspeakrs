@@ -6,6 +6,17 @@ All notable changes to `paraspeakrs` are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **`paraspeakrs live`: a spike of live meeting analysis.** `live replay` plays a
+  finished transcript back as if live, in a local web page. A chat model first
+  interviews you about the meeting and writes a brief: personas, participants, and
+  what each persona should comment on. During the replay a decision model that speaks
+  the JEV Decisions API cuts the transcript into sections by topic and decides per
+  persona whether new lines deserve a comment; the chat model writes the comments
+  and answers questions about the meeting so far. `live check` tests both model
+  endpoints. Design: `docs/plans/2026-11-09-live-meeting-analysis.md`.
+
 ## [0.10.0] — 2026-11-04
 
 ### Added

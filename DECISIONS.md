@@ -5,6 +5,32 @@ Autonomous decisions taken without waiting for review. Newest first.
 Each entry carries its review status. **Accepted** means the user reviewed it
 after the fact and let it stand; an entry stays **Pending** until they do.
 
+## 2026-11-09 — Live analysis: where the decision model is assumed to listen
+
+*Status: pending.*
+
+The user gave `localhost:8080` for their JEV-like model but no path or model name,
+and this cloud session cannot reach their Mac to look. Hosted JEV answers at
+`/v1/decisions` (AI/ML API) and `/api/alpha/decisions` (OpenRouter).
+
+- **Ask before building.** Blocks the spike on a value that only matters at run time.
+- **Default to `/v1/decisions` and `typesafe/jev-1.14`, and make `paraspeakrs live
+  check` try the other known paths on a 404.** ← chosen. One flag or environment
+  variable fixes a wrong guess, and the check says which one.
+
+## 2026-11-09 — Live analysis: section boundaries on the line, not the batch
+
+*Status: pending.*
+
+The analysis works on batches of about 30 s. In the browser run the last two lines
+about the launch date landed in the budget section, because a new section started at
+the first line of the batch in which the topic changed.
+
+- **Smaller batches.** More decision calls, and still up to one batch off.
+- **Ask where the new topic starts, in the same request.** ← chosen. A JEV `choice`
+  question over the batch's lines rides along with the yes/no topic question, so it
+  costs no extra call. The batch is cut at the chosen line.
+
 ## 2026-11-04 — Recorder distribution: build on the user's Mac via `paraspeakrs install-recorder`
 
 *Status: pending.*

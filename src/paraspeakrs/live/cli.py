@@ -216,7 +216,11 @@ def _serve(args: argparse.Namespace, source, session_dir: Path) -> None:
     print(f"open {url}", file=sys.stderr)
     if not args.no_browser:
         threading.Timer(1.0, webbrowser.open, (url,)).start()
-    uvicorn.run(create_app(session), host=args.host, port=args.port, log_level="warning")
+    # An open page keeps its event stream open; without a timeout, SIGTERM and Ctrl+C
+    # wait for the browser to let go.
+    uvicorn.run(
+        create_app(session), host=args.host, port=args.port, log_level="warning", timeout_graceful_shutdown=2
+    )
 
 
 SAMPLE_STATE = "[00:00:05] Anna: Then we move the launch to the third of March.\n[00:00:09] Ben: Agreed."

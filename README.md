@@ -950,6 +950,8 @@ speaker and everyone else is an `R_` speaker. The job shows up in `paraspeakrs t
 - Needs macOS 15 or later and the Xcode Command Line Tools (`xcode-select --install`).
 - ⌘⇧M starts and stops a recording. It is also Teams' mute shortcut, and the
   recorder takes it first while it runs.
+- When a recording starts, a pop-up offers to follow it live: **Open** starts
+  [`paraspeakrs live follow`](#live-meeting-analysis-spike) for it and opens the page.
 - The first recording asks for microphone and "System Audio Recording Only"
   permission. It does not need Screen Recording.
 - The app is built and signed on your own Mac, so Gatekeeper does not block it.
@@ -984,7 +986,8 @@ takes the one in progress), reads the recorder's two tracks as they are written,
 and transcribes them in pieces of 6 to 20 s, cut at pauses, with a Parakeet model
 that stays loaded. Lines show up a few seconds after someone stops talking, also
 while you are still preparing the meeting. The ASR model must already be on disk
-(`paraspeakrs fetch-models`). The recorder needs no change.
+(`paraspeakrs fetch-models`). The recorder offers to start `live follow` when a
+recording starts (see [packages/recorder-macos/README.md](packages/recorder-macos/README.md#live-meeting)).
 
 **Speakers.** Each piece is also diarized together with the minute before it, by the
 speakrs sidecar (about 1.5 s per piece on CoreML), so each track is split into

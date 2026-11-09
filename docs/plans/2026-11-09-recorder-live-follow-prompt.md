@@ -1,7 +1,15 @@
 # Recorder: offer `live follow` when a meeting recording starts
 
-*Status: planned 2026-11-09, not started. Comes before the persona package
+*Status: built and checked on the Mac 2026-11-09 (`LiveFollow.swift`, `LiveFollowPrompt.swift`):
+pop-up under the icon, Open, Dismiss then "Open live meeting", a second recording replaces the
+server, quit stops it, stopping the recording closes the pop-up. Comes before the persona package
 (`docs/plans/2026-11-09-live-persona-package.md`).*
+
+Found while building: with a page open, `live follow` ignored SIGTERM until the browser
+let go of the event stream. `uvicorn.run(..., timeout_graceful_shutdown=2)` fixes that; the
+recorder still sends SIGKILL after 5 s, since a transcription in progress can hold Python.
+The recorder matches a running server on `source.watching` (the `.mic.caf` path, known at
+once) as well as `source.name` (known once the ASR model has loaded).
 
 ## What the user asked
 

@@ -104,6 +104,25 @@ Without the system-audio permission the recording still works, but the right
 channel is silent. The app warns after 30 s without system audio. It shows the
 same warning when nothing is playing, because macOS reports both cases the same way.
 
+## Live meeting
+
+When a recording starts, a small pop-up under the menu-bar icon asks **Follow this
+meeting live?** It floats over full-screen apps and does not take focus from the
+meeting app.
+
+- **Open** starts `paraspeakrs live follow <name>.mic.caf --no-browser --port 8765`
+  in the background and opens http://127.0.0.1:8765/ once it answers (a few
+  seconds). A follow server that already answers for this recording is reused.
+- **Dismiss** closes the pop-up. The panel keeps an **Open live meeting** button
+  while recording, and afterwards while the follow server runs.
+- The follow server keeps running after the recording stops, so the page stays
+  readable. It is stopped when the next recording is followed, and when the app
+  quits.
+- If port 8765 is taken by a `live follow` you started yourself for another
+  recording, the panel says so; stop that one first.
+- After the recording stops, `paraspeakrs run` and the follow server's catch-up can
+  run at the same time: two ASR models, about 3–4 GB of RAM each at peak.
+
 ## Files
 
 Recordings go to `~/Documents/paraspeakrs-recordings/`:
@@ -112,6 +131,7 @@ Recordings go to `~/Documents/paraspeakrs-recordings/`:
 |---|---|
 | `2026-11-04_1430.m4a` | Stereo AAC, 128 kbps, about 46–58 MB per hour |
 | `2026-11-04_1430.log` | Output of `paraspeakrs run` |
+| `2026-11-04_1430.live.log` | Output of `paraspeakrs live follow`, when it was opened for this recording |
 
 The transcript itself is a paraspeakrs job: open it with `paraspeakrs tui`.
 

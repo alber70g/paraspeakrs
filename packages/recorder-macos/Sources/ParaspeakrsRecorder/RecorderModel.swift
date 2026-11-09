@@ -19,6 +19,19 @@ final class RecorderModel: ObservableObject {
     @Published private(set) var systemSilent = false
     @Published private(set) var finishing = 0
     @Published private(set) var transcribing = 0
+    /// Set when a recording starts: the panel and the pop-up ask whether to follow it live.
+    @Published private(set) var offerLiveFollow = false {
+        didSet {
+            guard offerLiveFollow != oldValue else { return }
+            if offerLiveFollow {
+                prompt.show(open: { [weak self] in self?.openLiveFollow() },
+                            dismiss: { [weak self] in self?.dismissLiveFollow() })
+            } else {
+                prompt.close()
+            }
+        }
+    }
+    @Published private(set) var liveFollowPhase = LiveFollow.Phase.off
     /// While recording, one press of the shortcut is left to the frontmost app
     /// (⇧⌘M mutes in Teams); two presses within this many seconds stop.
     static let doubleTapInterval = 0.5
@@ -34,8 +47,14 @@ final class RecorderModel: ObservableObject {
     private let background = DispatchQueue(label: "paraspeakrs.recorder.finish")
     private var keyMonitor: KeyMonitor?
     private var lastPress = Date.distantPast
+    private let liveFollow = LiveFollow()
+    private let prompt = LiveFollowPrompt()
+    /// The recording live follow is for: the current one, or the last one.
+    private var liveBase: URL?
 
     var isRecording: Bool { startedAt != nil }
+    /// "Open live meeting" while recording, and after it while our follow server still runs.
+    var canOpenLiveMeeting: Bool { liveBase != nil && (isRecording || liveFollowPhase == .running) }
 
     init() {
         transcriber.onChange = { [weak self] count in self?.transcribing = count }
@@ -43,6 +62,14 @@ final class RecorderModel: ObservableObject {
             self?.error = message
             self?.errorLog = log
         }
+        liveFollow.onChange = { [weak self] phase in self?.liveFollowPhase = phase }
+        liveFollow.onFailure = { [weak self] message, log in
+            self?.error = message
+            self?.errorLog = log
+        }
+        _ = NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification, object: nil, queue: .main
+        ) { [weak self] _ in MainActor.assumeIsolated { self?.liveFollow.stop() } }
         Notifier.requestPermission()
         resumeShortcut()
     }
@@ -81,6 +108,14 @@ final class RecorderModel: ObservableObject {
         if isRecording { stop(executable: Self.executable) } else { start() }
     }
 
+    func openLiveFollow() {
+        offerLiveFollow = false
+        guard let liveBase else { return }
+        liveFollow.open(base: liveBase, executable: Self.executable)
+    }
+
+    func dismissLiveFollow() { offerLiveFollow = false }
+
     /// The path the panel's settings field stores; read at stop time so a
     /// recording started from the shortcut uses the current setting.
     static var executable: String {
@@ -96,10 +131,13 @@ final class RecorderModel: ObservableObject {
             }
             do {
                 try FileManager.default.createDirectory(at: Self.recordingsDirectory, withIntermediateDirectories: true)
-                let capture = MeetingCapture(base: Self.newBase())
+                let base = Self.newBase()
+                let capture = MeetingCapture(base: base)
                 try capture.start()
                 self.capture = capture
                 startedAt = Date()
+                liveBase = base
+                offerLiveFollow = true
                 rebuiltForSilence = false
                 systemSilent = false
                 // Both callbacks are delivered on the main queue.
@@ -121,6 +159,7 @@ final class RecorderModel: ObservableObject {
         self.capture = nil
         startedAt = nil
         systemSilent = false
+        offerLiveFollow = false
         finishing += 1
         Task { @MainActor in
             // The capture is no longer touched here once it is handed over.

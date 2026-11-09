@@ -6,6 +6,20 @@ All notable changes to `paraspeakrs` are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **The recorder offers to follow a meeting live.** When a recording starts, a
+  pop-up under the menu-bar icon asks "Follow this meeting live?". **Open** starts
+  `paraspeakrs live follow` for that recording in the background and opens the page;
+  after **Dismiss**, the panel keeps an **Open live meeting** button. The follow
+  server stays up after the recording stops and ends with the next one or when the
+  app quits. Run `paraspeakrs install-recorder` to update the app.
+
+### Fixed
+
+- `paraspeakrs live` stops within about 3 s on Ctrl+C or SIGTERM while a page is
+  open; it used to wait until the browser closed the page.
+
 ## [0.11.0] — 2026-11-09
 
 ### Added

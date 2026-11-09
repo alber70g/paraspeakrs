@@ -78,7 +78,7 @@ final class Transcriber {
         return env
     }
 
-    private static func lastLine(of file: URL) -> String? {
+    static func lastLine(of file: URL) -> String? {
         guard let text = try? String(contentsOf: file, encoding: .utf8) else { return nil }
         return text.split(whereSeparator: \.isNewline).last.map(String.init)
     }

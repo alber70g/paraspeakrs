@@ -33,6 +33,19 @@ struct MeetingSection: View {
                 }
             }
 
+            if model.offerLiveFollow {
+                HStack {
+                    Text("Follow this meeting live?")
+                    Spacer()
+                    Button("Dismiss") { model.dismissLiveFollow() }
+                    Button("Open") { model.openLiveFollow() }
+                }
+            } else if model.liveFollowPhase == .starting {
+                Text("Starting live follow…").foregroundStyle(.secondary)
+            } else if model.canOpenLiveMeeting {
+                Button("Open live meeting") { model.openLiveFollow() }
+            }
+
             if model.systemSilent {
                 warning("No system audio for \(Int(RecorderModel.silenceWarningSeconds)) s. If a call is playing, allow "
                         + "Paraspeakrs Recorder under System Audio Recording.",

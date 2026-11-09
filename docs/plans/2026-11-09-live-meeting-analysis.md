@@ -35,7 +35,7 @@ Out of scope for the spike: more than one meeting per process, authentication, e
 | Section | A topic change, decided by the decision model on every batch of about 30 s of meeting. A section shorter than 60 s is never closed by a topic change; one longer than 15 min is closed regardless. |
 | Persona | Both meanings. **Personas** are the viewpoints that comment; **participants** are the people in the meeting, with role and goals, so both models know who wants what. |
 | Per-meeting input | A questionnaire led by the chat model, one multiple-choice question per turn with a free-text answer always possible. It ends in a **brief** (JSON) the user can edit before starting. |
-| Decision model | Any server that speaks the JEV Decisions API. Default `http://localhost:8080/v1/decisions`, model `typesafe/jev-1.14`. |
+| Decision model | Any server that speaks the JEV Decisions API. Default `http://localhost:8001/v1/decisions`, model `typesafe/jev-1.14`. |
 | Chat model | Any OpenAI-compatible server. Default `http://localhost:8000/v1`, first model it lists. `<think>` blocks are stripped. |
 | Storage | Each run writes `brief.json` and `events.jsonl` to `~/.local/share/paraspeakrs/live/sessions/<time>-<name>/`. Briefs are also kept in `live/briefs/` and offered again on the next run. |
 

@@ -65,6 +65,20 @@ body.hide-dec .dec { display: none; }
 .qa .q { font-weight: 600; }
 .qa .a { white-space: pre-wrap; }
 details summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+.spk { padding: 8px 0; border-top: 1px solid var(--line); }
+.spk:first-child { border-top: 0; padding-top: 0; }
+.spk .head { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.spk .head b { font-size: 14px; }
+.spk .match { font-size: 13px; margin: 2px 0 4px; }
+.spk .match .pct { font: 12px var(--mono); }
+.spk .row, #nowbox .row { margin-top: 4px; flex-wrap: nowrap; }
+.spk input[type=text] { padding: 4px 8px; }
+.spk button { padding: 4px 10px; font-size: 13px; white-space: nowrap; }
+#nowbox { margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+.chips button { padding: 3px 10px; font-size: 13px; border-radius: 999px; }
+#marks div { color: var(--muted); }
+#marks div.named { color: var(--text); }
 [hidden] { display: none !important; }
 </style>
 </head>
@@ -81,6 +95,19 @@ details summary { cursor: pointer; color: var(--muted); font-size: 13px; }
   <div id="timeline"></div>
   <aside>
     <div id="errors" hidden></div>
+
+    <div id="speakerbox" hidden>
+      <h2>Speakers</h2>
+      <div id="nowbox">
+        <p class="small" style="margin:0"><b>Speaking now</b> <span class="muted">Click who is talking. Their voice gets the name a few seconds later, once that moment is processed.</span></p>
+        <div class="chips" id="now-names"></div>
+        <div class="row" style="margin-top:0"><input type="text" id="now-name" list="voice-names" placeholder="Or type a name"><button id="now-mark">Mark</button></div>
+        <div id="marks" class="small"></div>
+      </div>
+      <datalist id="voice-names"></datalist>
+      <p class="muted small" id="speakers-empty">Voices appear here once someone has spoken.</p>
+      <div id="speakers"></div>
+    </div>
 
     <div id="describe">
       <h2>Prepare the meeting</h2>
@@ -291,6 +318,7 @@ function running(b) {
     list.append(d);
   });
   renderBrief($("brief-running"), b);
+  renderNowNames();
 }
 
 // At equal times, what was said about the batch that just ended comes before the next section and line.
@@ -319,7 +347,9 @@ const handlers = {
     for (const line of e.lines) {
       const row = el("div", "line");
       const body = el("div");
-      body.append(el("span", "who", `${line.speaker}:`), document.createTextNode(line.text));
+      const who = el("span", "who", `${speakerName(line)}:`);
+      if (line.speaker_id) who.dataset.sid = line.speaker_id;
+      body.append(who, document.createTextNode(line.text));
       row.append(el("span", "t", fmt(line.start)), body);
       place(row, line.start, "line");
       $("clock").textContent = `${fmt(line.end)}${sourceSeconds ? " / " + fmt(sourceSeconds) : ""}`;
@@ -354,6 +384,8 @@ const handlers = {
     $("answers").prepend(qa);
   },
   error(e) { showError(`${e.where}: ${e.message}`); },
+  speakers(e) { renderSpeakers(e.speakers); },
+  mark(e) { showMark(e); },
   source(e) {
     const node = $("recorder");
     node.className = "meta";
@@ -363,6 +395,105 @@ const handlers = {
     else node.textContent = e.detail || e.state;
   },
 };
+
+// ---- speakers --------------------------------------------------------------
+
+let speakers = {};
+const speakerRows = {};
+const pct = (score) => `${Math.round(score * 100)}%`;
+const speakerName = (line) => (speakers[line.speaker_id] || {}).display || line.speaker;
+
+async function nameSpeaker(id, name) {
+  try { renderSpeakers((await api(`/api/speakers/${encodeURIComponent(id)}`, { name })).speakers); }
+  catch (e) { showError(`Naming ${id}: ${e.message}`); }
+}
+
+function speakerRow(id) {
+  if (speakerRows[id]) return speakerRows[id];
+  const root = el("div", "spk");
+  const head = el("div", "head");
+  const title = el("b");
+  const meta = el("span", "muted small");
+  head.append(title, meta);
+  const match = el("div", "match");
+  const input = el("input");
+  input.type = "text";
+  input.placeholder = "Name this speaker";
+  input.setAttribute("list", "voice-names");
+  const save = el("button", "", "Save");
+  const clear = el("button", "", "Clear");
+  save.onclick = () => nameSpeaker(id, input.value);
+  input.addEventListener("keydown", (e) => { if (e.key === "Enter") nameSpeaker(id, input.value); });
+  clear.onclick = () => { input.value = ""; nameSpeaker(id, null); };
+  const row = el("div", "row");
+  row.append(input, save, clear);
+  root.append(head, match, row);
+  $("speakers").append(root);
+  return (speakerRows[id] = { title, meta, match, input, clear, shown: undefined });
+}
+
+function renderSpeakers(list) {
+  if (!list) return;
+  $("speakerbox").hidden = false;
+  $("speakers-empty").hidden = list.length > 0;
+  for (const s of list) {
+    const before = speakers[s.id];
+    speakers[s.id] = s;
+    const r = speakerRow(s.id);
+    r.title.textContent = s.display;
+    r.meta.textContent = `${s.track === "mic" ? "microphone" : "system audio"} · ${fmt(s.seconds)}${s.name ? ` · ${s.label}` : ""}`;
+    r.match.replaceChildren();
+    if (s.suggested) {
+      r.match.append(document.createTextNode(`Sounds like ${s.suggested} `), el("span", "pct", pct(s.match.score)), document.createTextNode(" "));
+      const accept = el("button", "", "Accept");
+      accept.onclick = () => nameSpeaker(s.id, s.suggested);
+      r.match.append(accept);
+    } else if (s.match) {
+      const known = s.name && s.match.name === s.name;
+      r.match.className = "match muted";
+      r.match.append(document.createTextNode(known ? "Matches the stored voice " : `Closest stored voice: ${s.match.name} `), el("span", "pct", pct(s.match.score)));
+    } else {
+      r.match.className = "match muted";
+      r.match.textContent = "No stored voices to compare with.";
+    }
+    if (s.suggested) r.match.className = "match";
+    r.clear.hidden = !s.name;
+    // Do not overwrite what is being typed.
+    if (document.activeElement !== r.input && r.shown !== s.name) r.input.value = s.name || "";
+    r.shown = s.name;
+    if (!before || before.display !== s.display) {
+      for (const who of document.querySelectorAll(`.who[data-sid="${CSS.escape(s.id)}"]`)) who.textContent = `${s.display}:`;
+    }
+  }
+  renderNowNames();
+}
+
+// Names to click while someone talks: the brief's participants, then names given in this meeting.
+function renderNowNames() {
+  const names = [...(brief && brief.participants ? brief.participants.map((p) => p.name) : []), ...Object.values(speakers).map((s) => s.name)]
+    .filter((n, i, all) => n && all.indexOf(n) === i);
+  const box = $("now-names");
+  box.replaceChildren(...names.map((n) => { const b = el("button", "", n); b.onclick = () => markSpeaking(n); return b; }));
+}
+
+async function markSpeaking(name) {
+  if (!name.trim()) return $("now-name").focus();
+  try { await api("/api/speaking-now", { name: name.trim() }); $("now-name").value = ""; }
+  catch (e) { showError(`Speaking now: ${e.message}`); }
+}
+$("now-mark").onclick = () => markSpeaking($("now-name").value);
+$("now-name").addEventListener("keydown", (e) => { if (e.key === "Enter") markSpeaking($("now-name").value); });
+
+const markRows = {};
+function showMark(e) {
+  const key = `${e.at}|${e.name}`;
+  const row = markRows[key] || (markRows[key] = el("div"));
+  const who = e.speaker && speakers[e.speaker] ? speakers[e.speaker].label : e.speaker;
+  row.className = e.state === "named" ? "named" : "";
+  row.textContent = `${fmt(e.at)} ${e.name}: ${e.state === "waiting" ? "waiting for that moment to be processed…" : e.state === "named" ? `named ${who}` : "nobody was speaking then"}`;
+  $("marks").prepend(row);
+  while ($("marks").children.length > 4) $("marks").lastChild.remove();
+}
 
 async function ask() {
   const q = $("question-in").value.trim();
@@ -381,6 +512,8 @@ $("show-dec").onchange = (e) => document.body.classList.toggle("hide-dec", !e.ta
     const state = await api("/api/state");
     const src = state.source;
     sourceSeconds = src.seconds || 0;
+    $("voice-names").replaceChildren(...(state.voices || []).map((n) => { const o = el("option"); o.value = n; return o; }));
+    renderSpeakers(state.speakers);
     const models = `chat ${state.models.chat.model || "(first listed)"} · decisions ${state.models.decisions.model}`;
     $("source").textContent = src.kind === "replay"
       ? `${src.name} · ${src.lines} lines · ${src.speed}× · ${models}`

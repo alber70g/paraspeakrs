@@ -45,25 +45,31 @@ class CafTail:
     def seconds_read(self) -> float:
         return self.frames_read / self.sample_rate if self.sample_rate else 0.0
 
+    @property
+    def seconds_written(self) -> float:
+        """How much audio the file holds now, read or not: the recording's clock."""
+        if not self._ready():
+            return 0.0
+        size = os.fstat(self._fh.fileno()).st_size - self._audio_start
+        return max(0, size // self._bytes_per_frame) / self.sample_rate
+
     def close(self) -> None:
         if self._fh is not None:
             self._fh.close()
             self._fh = None
 
-    def read(self) -> np.ndarray:
-        """The mono float32 samples written since the last call; empty when there are none yet."""
-        if self._fh is None:
-            try:
-                self._fh = self.path.open("rb")
-            except FileNotFoundError:
-                return _empty()
-        if self._dtype is None and not self._parse_header():
+    def read(self, max_frames: int | None = None) -> np.ndarray:
+        """The mono float32 samples written since the last call, at most ``max_frames`` of them;
+        empty when there are none yet."""
+        if not self._ready():
             return _empty()
         end = os.fstat(self._fh.fileno()).st_size
         declared = self._declared_size()
         if declared > 0:
             end = min(end, self._audio_start + declared)
         available = end - self._pos
+        if max_frames is not None:
+            available = min(available, max_frames * self._bytes_per_frame)
         available -= available % self._bytes_per_frame
         if available <= 0:
             return _empty()
@@ -76,6 +82,23 @@ class CafTail:
             samples = samples.reshape(-1, self.channels).mean(axis=1)
         self.frames_read += len(samples)
         return samples
+
+    def seek(self, seconds: float) -> bool:
+        """Continue reading at ``seconds`` into the audio; False while there is no header yet."""
+        if not self._ready():
+            return False
+        frames = max(0, round(seconds * self.sample_rate))
+        self._pos = self._audio_start + frames * self._bytes_per_frame
+        self.frames_read = frames
+        return True
+
+    def _ready(self) -> bool:
+        if self._fh is None:
+            try:
+                self._fh = self.path.open("rb")
+            except FileNotFoundError:
+                return False
+        return self._dtype is not None or self._parse_header()
 
     def _declared_size(self) -> int:
         """The data chunk's size without its 4-byte edit count; 0 when not known yet."""

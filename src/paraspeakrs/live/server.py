@@ -148,6 +148,12 @@ class LiveSession:
         self._batcher = StepBatcher(step)
         self._pump: asyncio.Task | None = None
         self._task: asyncio.Task | None = None
+        # The meeting's voices, when the source tells speakers apart (``speakers.py``).
+        self.speakers = getattr(source, "speakers", None)
+        self.book = getattr(self.speakers, "book", None)
+        if self.book is not None:
+            self.book.on_change = lambda: self.emit({"type": "speakers", "speakers": self.book.snapshot()})
+            self.speakers.on_mark = self.emit
 
     def emit(self, event: dict) -> None:
         event = {"seq": len(self.events), "time": time.time(), **event}
@@ -184,7 +190,28 @@ class LiveSession:
     async def ask(self, question: str) -> str:
         if self.analyzer is None:
             raise SessionStateError("start the meeting first")
-        return await self.analyzer.ask(question, self.heard)
+        return await self.analyzer.ask(question, self._named(self.heard))
+
+    def name_speaker(self, voice_id: str, name: str | None) -> list[dict]:
+        if self.book is None:
+            raise SessionStateError("this meeting does not tell speakers apart")
+        self.book.name(voice_id, name)
+        return self.book.snapshot()
+
+    def mark_speaking(self, name: str) -> dict:
+        """Name whoever is speaking right now, once that moment has been diarized."""
+        if self.speakers is None:
+            raise SessionStateError("this meeting does not tell speakers apart")
+        at = self.source.now() if hasattr(self.source, "now") else None
+        if at is None:
+            raise SessionStateError("no recording yet")
+        event = self.speakers.mark(at, name)
+        self.emit(event)
+        return event
+
+    def _named(self, lines: Sequence[Line]) -> list[Line]:
+        """Lines under the names their speakers have now, for the models to read."""
+        return self.book.relabel(lines) if self.book is not None else list(lines)
 
     def _start_pump(self) -> None:
         if self._pump is None:
@@ -241,7 +268,7 @@ class LiveSession:
                         break
                     batches.append(more)
                 for chunk in regroup(batches, CATCHUP_SECONDS):
-                    await self.analyzer.feed(chunk)
+                    await self.analyzer.feed(self._named(chunk))
             await self.analyzer.finish()
             self.state = "finished"
             self.emit({"type": "status", "state": "finished"})
@@ -291,6 +318,10 @@ class AskRequest(BaseModel):
     question: str
 
 
+class NameRequest(BaseModel):
+    name: str | None = None
+
+
 def create_app(session: LiveSession) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -317,6 +348,9 @@ def create_app(session: LiveSession) -> FastAPI:
                 "chat": {"url": session.chat.base_url, "model": session.chat.model},
             },
             "thresholds": session.thresholds.__dict__,
+            "speakers": session.book.snapshot() if session.book is not None else None,
+            # Names in the voice cache, offered while typing a name.
+            "voices": session.book.cache.names() if session.book is not None else [],
         }
 
     @app.post("/api/intake")
@@ -368,6 +402,24 @@ def create_app(session: LiveSession) -> FastAPI:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         except ChatError as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    @app.post("/api/speaking-now")
+    async def speaking_now(request: NameRequest) -> dict:
+        if not (request.name or "").strip():
+            raise HTTPException(status_code=422, detail="give a name")
+        try:
+            return session.mark_speaking(request.name)
+        except SessionStateError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.post("/api/speakers/{voice_id}")
+    async def name_speaker(voice_id: str, request: NameRequest) -> dict:
+        try:
+            return {"speakers": session.name_speaker(voice_id, request.name)}
+        except SessionStateError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=f"no speaker {voice_id!r}") from exc
 
     @app.get("/api/events")
     async def events() -> StreamingResponse:

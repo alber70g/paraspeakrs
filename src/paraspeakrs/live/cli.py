@@ -41,6 +41,11 @@ def add_parser(subparsers: argparse._SubParsersAction) -> None:
     follow.add_argument(
         "--others", default="Others", help="speaker name for the system-audio track (default: Others)"
     )
+    follow.add_argument(
+        "--no-speakers",
+        action="store_true",
+        help="do not tell voices apart: every line is --me or --others, by track",
+    )
     _add_session_flags(follow)
 
     replay = commands.add_parser("replay", help="play a finished transcript back as if live, in a web page")
@@ -123,10 +128,46 @@ def follow(args: argparse.Namespace, env: Settings) -> None:
     # not wait for a 2.4 GB download.
     asr = build_asr(env)
     target = args.recording.expanduser()
-    source = RecordingSource(target, asr, me=args.me, others=args.others)
+    session_dir = _session_dir(env.workspace_dir, "live")
+    speakers = None if args.no_speakers else _live_speakers(env, session_dir)
+    source = RecordingSource(
+        target,
+        asr,
+        me=args.me,
+        others=args.others,
+        speakers=speakers,
+        state_root=env.workspace_dir / "live" / "recordings",
+    )
     print(f"following recordings in {target}" if target.is_dir() else f"following {target}", file=sys.stderr)
-    print(f"speakers:  {args.me} (microphone), {args.others} (system audio)", file=sys.stderr)
-    _serve(args, source, env.workspace_dir, "live")
+    tracks = f"{args.me} (microphone), {args.others} (system audio)"
+    if speakers is None:
+        print(f"speakers:  {tracks}", file=sys.stderr)
+    else:
+        print(f"speakers:  told apart by voice per track: {tracks}; voices from {speakers.book.cache.path}", file=sys.stderr)
+    _serve(args, source, session_dir)
+
+
+def _live_speakers(env: Settings, session_dir: Path):
+    """Voices told apart with the speakrs sidecar, or None (with the reason) when it is missing."""
+    from ..audio import AudioPreparer
+    from ..cache import SpeakerCache, embedding_namespace
+    from ..diarization import SpeakrsDiarizer
+    from .speakers import SpeakerBook
+    from .windows import LiveSpeakers, WindowDiarizer
+
+    if not env.speakrs_bin.exists():
+        print(f"speakers:  speakrs-diar not found at {env.speakrs_bin}; lines are named by track", file=sys.stderr)
+        return None
+    if env.speakrs_mode == "cpu":
+        # Measured: a 30 s window took 26 s on CPU against 0.8 s on CoreML.
+        print("speakers:  SPEAKRS_MODE=cpu is too slow to keep up live; try --no-speakers", file=sys.stderr)
+    diarizer = SpeakrsDiarizer(
+        AudioPreparer(), binary=env.speakrs_bin, models_dir=env.speakrs_models_dir, mode=env.speakrs_mode
+    )
+    cache = SpeakerCache(env.workspace_dir / "speaker-cache.json", namespace=embedding_namespace("speakrs"))
+    # Kept with the recording once it is found (`SpeakerBook.attach`), so a restart picks it up.
+    book = SpeakerBook(cache, session_id=session_dir.name)
+    return LiveSpeakers(book, WindowDiarizer(diarizer, session_dir / "windows"))
 
 
 def replay(args: argparse.Namespace, workspace_dir: Path) -> None:
@@ -135,26 +176,33 @@ def replay(args: argparse.Namespace, workspace_dir: Path) -> None:
 
     lines = load_lines(args.transcript)
     print(f"{len(lines)} lines from {args.transcript.name}, replayed at {args.speed:g}x", file=sys.stderr)
-    _serve(args, ReplaySource(args.transcript.name, lines, speed=args.speed), workspace_dir, args.transcript.stem)
+    source = ReplaySource(args.transcript.name, lines, speed=args.speed)
+    _serve(args, source, _session_dir(workspace_dir, args.transcript.stem))
 
 
-def _serve(args: argparse.Namespace, source, workspace_dir: Path, name: str) -> None:
+def _session_dir(workspace_dir: Path, name: str) -> Path:
+    from .brief import slug
+
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    return workspace_dir / "live" / "sessions" / f"{stamp}-{slug(name) or 'meeting'}"
+
+
+def _serve(args: argparse.Namespace, source, session_dir: Path) -> None:
     import uvicorn
 
     from .analyzer import Thresholds
-    from .brief import load_brief, slug
+    from .brief import load_brief
     from .server import LiveSession, create_app
 
     brief = load_brief(args.brief) if args.brief else None
-    stamp = time.strftime("%Y%m%d-%H%M%S")
-    session_dir = workspace_dir / "live" / "sessions" / f"{stamp}-{slug(name) or 'meeting'}"
     decisions, chat = _clients(args)
     session = LiveSession(
         source,
         decisions,
         chat,
         session_dir=session_dir,
-        briefs_dir=workspace_dir / "live" / "briefs",
+        # <workspace>/live/briefs, next to <workspace>/live/sessions.
+        briefs_dir=session_dir.parents[1] / "briefs",
         thresholds=Thresholds(
             topic=args.topic_threshold, comment=args.comment_threshold, min_section_seconds=args.min_section
         ),

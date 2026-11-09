@@ -23,12 +23,21 @@ class Line:
     end: float
     speaker: str
     text: str
+    # The meeting speaker (``speakers.py``) the line is from, when voices are told apart.
+    speaker_id: str | None = None
 
     def render(self) -> str:
         return f"[{format_time(self.start)}] {self.speaker}: {self.text}"
 
     def to_json(self) -> dict:
-        return {"start": round(self.start, 2), "end": round(self.end, 2), "speaker": self.speaker, "text": self.text}
+        out = {"start": round(self.start, 2), "end": round(self.end, 2), "speaker": self.speaker, "text": self.text}
+        if self.speaker_id:
+            out["speaker_id"] = self.speaker_id
+        return out
+
+    @classmethod
+    def from_json(cls, data: dict) -> Line:
+        return cls(data["start"], data["end"], data["speaker"], data["text"], data.get("speaker_id"))
 
 
 def render(lines: Sequence[Line]) -> str:

@@ -5,6 +5,46 @@ Autonomous decisions taken without waiting for review. Newest first.
 Each entry carries its review status. **Accepted** means the user reviewed it
 after the fact and let it stand; an entry stays **Pending** until they do.
 
+## 2026-11-09 — Live speakers: diarize each piece with the minute before it, with the speakrs sidecar
+
+*Status: pending.*
+
+`live follow` named lines by track. The user asked for speakers told apart live,
+named in the page, and matched to known voices with a percentage. speakrs has no
+streaming mode, and found no speakers at all in a lone 10 s piece.
+
+- **Rolling 60 s window per track through the existing speakrs-diar sidecar, matched
+  to meeting speakers by voice print.** ← chosen. Measured on CoreML: 1.3-1.6 s per
+  window; window prints matched the whole-recording speaker at 0.84-0.97. Same model
+  as the voice cache (`speakrs:256`), so the 11 named voices already there are
+  matchable. No Rust or wheel change. CPU mode is too slow (26 s for a 30 s window).
+- **New embed-only mode in the sidecar** (speakrs exposes `EmbeddingModel::embed`).
+  Same embeddings, one load per meeting; but a Rust change and a wheel rebuild, and
+  no segmentation, so a piece with two voices stays one speaker.
+- **sherpa-onnx speaker embeddings** (already a dependency). Different features and
+  model, so the prints do not match the existing voice cache.
+- **diart** (online pyannote). Needs torch and a Hugging Face token; also a
+  different embedding space.
+
+Choices the user made: suggestions need a click (as in the labeling TUI); both tracks
+are diarized (the mic picks up the call and people in the room); naming folds the
+voice into the cache at once; lines wait about 1.5 s for their speaker. Thresholds:
+0.6 for "same voice in this meeting" (different people in the cache scored at most
+0.61, median 0.27), the cache's 0.75 for suggestions.
+
+Tuned after the first real meeting (41 min, in-room, 9 speakers in the full
+diarization), which the live run split into 24. The windows were replayed offline
+against the full diarization: a new speaker now needs 10 s of speech in its window
+(was 2 s): 12 voices instead of 23 at the same purity (0.84 against 0.85; about 0.85
+is the ceiling, where 60 s windows disagree with the whole-file diarization). A
+same-voice threshold of 0.5-0.65 and merging voices whose prints converge (0.7,
+0.75) were tried: merging lowered purity to 0.5-0.74, so it was left out. One meeting
+is one data point.
+
+Restarts: progress is kept per recording (`live/recordings/<name>/`), and the cache
+knows a live voice as `live:<recording>`, so a restart refolds the same member
+instead of adding the voice twice. Analysis state is not restored.
+
 ## 2026-11-09 — Live audio: read the recorder's growing CAF tracks, do not change the recorder
 
 *Status: pending.*

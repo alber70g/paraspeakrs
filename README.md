@@ -970,7 +970,7 @@ It needs two local models:
 
 - a **decision model** that speaks the [JEV Decisions API](https://openrouter.ai/docs/guides/community/jev.md)
   (TypeSafe's typed yes/no, choice and score answers with probabilities), by default at
-  `http://localhost:8080/v1/decisions`;
+  `http://localhost:8001/v1/decisions`;
 - an **OpenAI-compatible chat model**, by default at `http://localhost:8000/v1`.
 
 ```sh
@@ -982,11 +982,36 @@ paraspeakrs live replay meeting.txt     # the same page, for a finished transcri
 `live follow` waits for a recording in `~/Documents/paraspeakrs-recordings` (or
 takes the one in progress), reads the recorder's two tracks as they are written,
 and transcribes them in pieces of 6 to 20 s, cut at pauses, with a Parakeet model
-that stays loaded. The speaker is the track: `Me` for your microphone and `Others`
-for the call (`--me NAME`, `--others NAME`); the full diarization still runs after
-the recording stops. Lines show up a second or two after someone stops talking,
-also while you are still preparing the meeting. The ASR model must already be on
-disk (`paraspeakrs fetch-models`). The recorder needs no change.
+that stays loaded. Lines show up a few seconds after someone stops talking, also
+while you are still preparing the meeting. The ASR model must already be on disk
+(`paraspeakrs fetch-models`). The recorder needs no change.
+
+**Speakers.** Each piece is also diarized together with the minute before it, by the
+speakrs sidecar (about 1.5 s per piece on CoreML), so each track is split into
+voices: `Me 1`, `Others 1`, `Others 2` (the prefixes are `--me` and `--others`). A
+voice is recognized again by its voice print for the rest of the meeting. The
+Speakers panel on the page lists them with their talk time and the closest named
+voice in the voice cache (`speaker-cache.json`, the one `paraspeakrs label` fills)
+as a percentage. A match of 75% or more is offered with an **Accept** button; it is
+never applied without that click. Naming a voice, by Accept or by typing, renames
+its lines on the page and for the models, and stores the voice print in the cache,
+so later meetings and transcripts recognize it. **Speaking now** names a voice
+while it talks: click a participant from the brief (or a name already used, or type
+one) while someone speaks, and the voice heard in the 4 s around the click gets that
+name a few seconds later, once that moment is processed. A voice needs 10 s of
+speech within a minute before it counts as a new speaker; until then it is heard as
+the nearest known voice. `--no-speakers` names lines by track only. With
+`SPEAKRS_MODE=cpu` the diarization cannot keep up (a 30 s window took 26 s). The
+full diarization still runs after the recording stops.
+
+**Restarts and catching up.** What `live follow` has done is kept per recording in
+`<workspace>/live/recordings/<recording>/`: the lines handed out, how far each track
+is transcribed, and the speakers with their names. A restart during the meeting
+shows the earlier lines at once and continues where it stopped. Whatever is behind
+(after a restart, or the rest once the recorder stops) is processed 30 s per track
+at a time and shown as it goes, about 10 s of meeting per second on an M-series
+Mac. To process a recording from the start again, delete its folder there. The
+analysis (sections, comments) starts over with each run.
 
 On the page, describe the meeting and the chat model interviews you, one
 multiple-choice question at a time, to work out the **personas** (the viewpoints

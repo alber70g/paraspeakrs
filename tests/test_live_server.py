@@ -119,7 +119,7 @@ def test_cli_live_dispatches_with_the_workspace(monkeypatch, tmp_path):
 
     args, workspace = seen[0]
     assert (args.live_command, args.speed, args.chat_url) == ("replay", 0.0, "http://mac.local:8000/v1")
-    assert args.decisions_url == "http://localhost:8080/v1/decisions"
+    assert args.decisions_url == "http://localhost:8001/v1/decisions"
     assert workspace == tmp_path.resolve()
 
 
@@ -197,3 +197,79 @@ def test_a_backlog_is_analyzed_in_pieces_of_at_most_two_minutes():
     chunks = regroup(batches, 120)
     assert [[l.text for l in c] for c in chunks] == [["0", "1", "2", "3"], ["4", "5", "6", "7"], ["8", "9"]]
     assert regroup(batches[:1], 120) == batches[:1]
+
+
+class SpeakingRecording(FakeRecording):
+    """A live source that tells voices apart: one voice, heard before it has a name."""
+
+    def __init__(self, tmp_path) -> None:
+        from paraspeakrs.cache import SpeakerCache
+        from paraspeakrs.live.speakers import SpeakerBook
+        from paraspeakrs.live.windows import LiveSpeakers
+
+        super().__init__()
+        book = SpeakerBook(SpeakerCache(tmp_path / "speaker-cache.json"), session_id="s")
+        self.speakers = LiveSpeakers(book, lambda track, audio: ([], {}))
+
+    async def produce(self, status):
+        import asyncio
+
+        book = self.speakers.book
+        voice = book.place("mic", "Me", {"SPEAKER_00": [1.0, 0.0]}, {"SPEAKER_00": 9}, {"SPEAKER_00": 9})["SPEAKER_00"]
+        yield book.relabel([Line(0, 20, voice, "We launch on March 3rd.", speaker_id=voice)])
+        while not self.go_on.is_set():
+            await asyncio.sleep(0.01)
+        yield book.relabel([Line(20, 40, voice, "Next: the budget.", speaker_id=voice)])
+
+
+def test_a_speaker_named_in_the_page_is_read_by_that_name_from_then_on(tmp_path):
+    recording = SpeakingRecording(tmp_path)
+    decisions = FakeDecisions(lambda key, q, state: 0.1)
+    session = LiveSession(
+        recording, decisions.client(), FakeChat(_chat).client("m"),
+        session_dir=tmp_path / "session", briefs_dir=tmp_path / "briefs", step=30,
+    )
+    with TestClient(create_app(session)) as client:
+        _wait_for(lambda: len(session.heard) == 1)
+        [voice] = client.get("/api/state").json()["speakers"]
+        assert (voice["id"], voice["display"]) == ("S1", "Me 1")
+        assert session.events[1]["lines"][0] == {"start": 0, "end": 20, "speaker": "Me 1", "text": "We launch on March 3rd.", "speaker_id": "S1"}
+
+        named = client.post("/api/speakers/S1", json={"name": "Anna"}).json()["speakers"]
+        assert client.post("/api/speakers/S9", json={"name": "Ben"}).status_code == 404
+        client.post("/api/start", json={"brief": BRIEF})
+        recording.go_on.set()
+        _wait_for(lambda: session.state == "finished")
+
+    assert named[0]["display"] == "Anna"
+    assert [e["speakers"][0]["display"] for e in session.events if e["type"] == "speakers"][-1] == "Anna"
+    # The line heard as "Me 1" reaches the models as Anna, like the one after the naming.
+    analyzed = {line for r in decisions.requests for line in r["state"].get("new_lines", "").splitlines()}
+    assert {line.split("] ")[1].split(":")[0] for line in analyzed} == {"Anna"}
+
+
+def test_naming_is_refused_when_the_source_cannot_tell_voices_apart(session):
+    with TestClient(create_app(session)) as client:
+        assert client.get("/api/state").json()["speakers"] is None
+        assert client.post("/api/speakers/S1", json={"name": "Anna"}).status_code == 409
+
+
+def test_speaking_now_is_marked_at_the_recording_clock(tmp_path):
+    recording = SpeakingRecording(tmp_path)
+    recording.now = lambda: 754.25
+    session = LiveSession(
+        recording, FakeDecisions(lambda key, q, state: 0.1).client(), FakeChat(_chat).client("m"),
+        session_dir=tmp_path / "session", briefs_dir=tmp_path / "briefs", step=30,
+    )
+    with TestClient(create_app(session)) as client:
+        marked = client.post("/api/speaking-now", json={"name": "Anna"}).json()
+        assert client.post("/api/speaking-now", json={"name": " "}).status_code == 422
+
+    assert marked == {"type": "mark", "at": 754.25, "name": "Anna", "state": "waiting", "speaker": None}
+    assert [m.at for m in recording.speakers.marks] == [754.25]
+    assert marked in [{k: v for k, v in e.items() if k not in ("seq", "time")} for e in session.events]
+
+
+def test_speaking_now_is_refused_without_speakers(session):
+    with TestClient(create_app(session)) as client:
+        assert client.post("/api/speaking-now", json={"name": "Anna"}).status_code == 409

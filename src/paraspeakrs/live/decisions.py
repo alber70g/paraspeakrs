@@ -22,7 +22,7 @@ from typing import Any
 
 import httpx
 
-DEFAULT_DECISIONS_URL = "http://localhost:8080/v1/decisions"
+DEFAULT_DECISIONS_URL = "http://localhost:8001/v1/decisions"
 DEFAULT_DECISIONS_MODEL = "typesafe/jev-1.14"
 # Paths other servers use for the same API, tried by `paraspeakrs live check`
 # when the configured one answers 404.

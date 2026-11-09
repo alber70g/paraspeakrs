@@ -233,3 +233,59 @@ def test_48k_tracks_reach_the_model_at_16k_without_aliasing():
     np.testing.assert_allclose(low[middle], speech_band[::3][middle], atol=0.02)
     same, rate = to_asr_rate(speech_band[:100], 44_100)
     assert rate == 44_100 and same is not None
+
+
+def _recording(tmp_path, seconds: float, bursts: list[float]):
+    """A recording already on disk: the mic with a tone at each burst, the system track silent."""
+    base = tmp_path / "rec"
+    mic_path, system_path = tracks(base)
+    with mic_path.open("wb") as mic, system_path.open("wb") as system:
+        write_header(mic, sample_rate=RATE)
+        write_header(system, sample_rate=RATE)
+        _append(mic, _signal(seconds, bursts))
+        _append(system, np.zeros(int(seconds * RATE), dtype=np.float32))
+    return base, mic_path, system_path
+
+
+def _source(target, asr, **kwargs):
+    return RecordingSource(
+        target,
+        asr,
+        chunk_options={"min_seconds": 1, "max_seconds": 4, "pause_seconds": 0.3},
+        poll_seconds=0.01,
+        end_idle_seconds=0.2,
+        **kwargs,
+    )
+
+
+async def test_a_backlog_is_handed_out_in_rounds_not_at_the_end(tmp_path, monkeypatch):
+    # A restart in a running meeting, or the rest after the stop: the page must fill as it goes.
+    monkeypatch.setattr(listen, "MAX_READ_SECONDS", 5.0)
+    base, mic_path, _ = _recording(tmp_path, 40, [1.0, 11.0, 21.0, 31.0])
+    (tmp_path / "rec.m4a").write_bytes(b"")  # stopped already: everything goes through the drain
+
+    batches = [lines async for lines in _source(mic_path, ToneAsr()).produce(lambda s: None)]
+
+    assert len(batches) >= 4
+    assert [round(l.start) for batch in batches for l in batch] == [1, 11, 21, 31]
+
+
+async def test_a_restart_continues_where_the_last_run_stopped(tmp_path, monkeypatch):
+    monkeypatch.setattr(listen, "IDLE_SECONDS", 0.05)
+    base, mic_path, system_path = _recording(tmp_path, 12, [1.0, 9.0])
+    state_root = tmp_path / "state"
+    first = [l for ls in [x async for x in _source(mic_path, ToneAsr(), state_root=state_root).produce(lambda s: None)] for l in ls]
+
+    with mic_path.open("ab") as mic, system_path.open("ab") as system:
+        _append(mic, _signal(8, [3.0]))  # the meeting went on: a tone at 15 s
+        _append(system, np.zeros(8 * RATE, dtype=np.float32))
+    asr = ToneAsr()
+    statuses: list[dict] = []
+    batches = [x async for x in _source(mic_path, asr, state_root=state_root).produce(statuses.append)]
+
+    assert [round(l.start) for l in first] == [1, 9]
+    # The old lines come back first, as they were, without being transcribed again.
+    assert batches[0] == first
+    assert [round(l.start) for batch in batches[1:] for l in batch] == [15]
+    assert sum(asr.pieces) <= 8.5
+    assert "resumed" in [s.get("state") for s in statuses]

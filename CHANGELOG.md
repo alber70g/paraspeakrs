@@ -21,6 +21,17 @@ All notable changes to `paraspeakrs` are documented here. The format follows
   transcribes them in pieces cut at pauses with a Parakeet model that stays loaded,
   and shows each line a second or two after it is spoken. The speaker is the track
   (`Me`, `Others`; `--me`, `--others`). The recorder needs no change.
+- **`live follow` tells speakers apart and names them from the voice cache.** Each
+  piece is diarized with the minute before it, and the voices are kept apart by
+  voice print for the whole meeting. The page lists them with the closest stored
+  voice as a percentage, offers matches of 75% or more for one-click acceptance, and
+  takes typed names. A name relabels the voice's lines and is stored in
+  `speaker-cache.json`. **Speaking now** names whoever is talking at the click.
+  `--no-speakers` keeps the per-track names.
+- **`live follow` continues where it stopped.** Lines, track progress and speakers
+  are kept per recording in `<workspace>/live/recordings/`; a restart picks them up
+  instead of transcribing the meeting again. A backlog (after a restart, or after
+  the recorder stops) is shown in rounds of 30 s per track instead of all at the end.
 
 ## [0.10.0] — 2026-11-04
 

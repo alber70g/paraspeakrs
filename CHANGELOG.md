@@ -6,6 +6,8 @@ All notable changes to `paraspeakrs` are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.12.0] — 2026-11-09
+
 ### Added
 
 - **The recorder offers to follow a meeting live.** When a recording starts, a

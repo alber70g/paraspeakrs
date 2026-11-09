@@ -273,3 +273,65 @@ def test_speaking_now_is_marked_at_the_recording_clock(tmp_path):
 def test_speaking_now_is_refused_without_speakers(session):
     with TestClient(create_app(session)) as client:
         assert client.post("/api/speaking-now", json={"name": "Anna"}).status_code == 409
+
+
+SCOPE = {"name": "Scope guard", "comment_when": "work is added"}
+
+
+def test_the_persona_library_lists_saves_and_deletes(session, tmp_path):
+    with TestClient(create_app(session)) as client:
+        assert [e["persona"]["key"] for e in client.get("/api/personas/library").json()] == ["facilitator"]
+        saved = client.post("/api/personas/library", json={"persona": SCOPE}).json()["persona"]
+        # Kept next to the reusable briefs, in the workspace.
+        assert (tmp_path / "personas" / "scope-guard.json").exists()
+        listed = client.get("/api/personas/library").json()
+        bad = client.post("/api/personas/library", json={"persona": {"name": "no criteria"}})
+        gone = client.delete("/api/personas/library/scope-guard")
+        missing = client.delete("/api/personas/library/scope-guard")
+
+    assert saved["key"] == "scope-guard"
+    assert [(e["persona"]["key"], e["builtin"]) for e in listed] == [("facilitator", True), ("scope-guard", False)]
+    assert (bad.status_code, gone.status_code, missing.status_code) == (422, 200, 404)
+
+
+def test_meeting_personas_need_a_started_meeting_and_a_known_key(session):
+    with TestClient(create_app(session)) as client:
+        early = client.post("/api/personas", json={"persona": SCOPE})
+        client.post("/api/start", json={"brief": BRIEF})
+        bad = client.post("/api/personas", json={"persona": {"name": "x"}})
+        unknown_pause = client.post("/api/personas/nobody/pause", json={"paused": True})
+        unknown_remove = client.delete("/api/personas/nobody")
+    assert (early.status_code, bad.status_code) == (409, 422)
+    assert (unknown_pause.status_code, unknown_remove.status_code) == (404, 404)
+
+
+def test_a_persona_added_during_the_meeting_reruns_and_is_saved_in_the_brief(session, tmp_path):
+    with TestClient(create_app(session)) as client:
+        client.post("/api/start", json={"brief": BRIEF})
+        _wait_for(lambda: session.state == "finished")
+        added = client.post("/api/personas", json={"persona": SCOPE, "rerun": True}).json()["persona"]
+        _wait_for(lambda: any(e["type"] == "rerun" and e["state"] == "done" for e in session.events))
+        reusable = json.loads((tmp_path / "briefs" / "launch-sync.json").read_text())
+        assert client.post(f"/api/personas/{added['key']}/pause", json={"paused": True}).status_code == 200
+        assert client.delete(f"/api/personas/{added['key']}").status_code == 200
+
+    assert [p["key"] for p in reusable["personas"]] == ["owner-hawk", "scope-guard"]
+    reruns = [e for e in session.events if e["type"] == "comment" and e.get("rerun")]
+    assert reruns and {c["persona"] for c in reruns} == {"scope-guard"}
+    after = json.loads((tmp_path / "session" / "brief.json").read_text())
+    assert [p["key"] for p in after["personas"]] == ["owner-hawk"]
+    assert [e["paused"] for e in session.events if e["type"] == "personas"] == [[], ["scope-guard"], []]
+
+
+def test_personas_are_proposed_from_what_was_heard_before_the_start(session):
+    proposal = json.dumps({"type": "personas", "personas": [SCOPE]})
+    fake = FakeChat(lambda m: proposal if "propose new personas" in m[0]["content"] else "ok")
+    session.chat = fake.client("m")
+    session.heard = [Line(0, 5, "Anna", "We also build the app.")]
+    with TestClient(create_app(session)) as client:
+        reply = client.post("/api/personas/suggest", json={"history": [{"role": "user", "content": "more"}]}).json()
+        empty = client.post("/api/personas/suggest", json={"history": []})
+    assert [p["name"] for p in reply["personas"]] == ["Scope guard"]
+    assert reply["question"] is None and reply["history"][-1]["role"] == "assistant"
+    assert empty.status_code == 422
+    assert "Anna: We also build the app." in fake.requests[0]["messages"][0]["content"]

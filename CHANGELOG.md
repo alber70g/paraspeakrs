@@ -14,6 +14,13 @@ All notable changes to `paraspeakrs` are documented here. The format follows
   after **Dismiss**, the panel keeps an **Open live meeting** button. The follow
   server stays up after the recording stops and ends with the next one or when the
   app quits. Run `paraspeakrs install-recorder` to update the app.
+- **`paraspeakrs live`: personas during the meeting.** A persona library with a
+  built-in Facilitator, whose comments are questions to steer the meeting, plus the
+  personas you save. "Suggest from the meeting" proposes personas fitted to what was
+  said so far. A persona added during the meeting starts from now or reruns over
+  the meeting so far; rerun comments land in the timeline at the moment they are
+  about. Personas can be paused and removed; changes are saved in the brief. A
+  Comments list in the sidebar jumps to each comment in the timeline.
 
 ### Fixed
 

@@ -51,12 +51,8 @@ class Brief(BaseModel):
         """Every persona gets a key that is safe in a question name and unique."""
         seen: set[str] = set()
         for persona in self.personas:
-            base = slug(persona.key or persona.name) or "persona"
-            key, n = base, 2
-            while key in seen:
-                key, n = f"{base}-{n}", n + 1
-            persona.key = key
-            seen.add(key)
+            persona.key = persona_key(persona, seen)
+            seen.add(persona.key)
         return self
 
     def persona(self, key: str) -> Persona:
@@ -104,6 +100,15 @@ class Brief(BaseModel):
 
 def slug(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")[:40]
+
+
+def persona_key(persona: Persona, taken: set[str]) -> str:
+    """The persona's key or name as a slug, numbered when it is taken."""
+    base = slug(persona.key or persona.name) or "persona"
+    key, n = base, 2
+    while key in taken:
+        key, n = f"{base}-{n}", n + 1
+    return key
 
 
 def load_brief(path: Path) -> Brief:

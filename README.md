@@ -1030,6 +1030,24 @@ replay:
 Anything said before you press Start meeting is analyzed right after, so preparing
 during the first minutes of the meeting costs nothing.
 
+**Personas during the meeting.** Personas can be added, paused and removed while
+the meeting runs. **Add persona** offers the persona library: a built-in
+**Facilitator**, whose comments are questions you can ask to steer the meeting
+(an open decision, a missing owner or date, drifting off the agenda), and every
+persona you saved (`~/.local/share/paraspeakrs/live/personas/`, one JSON file
+each). **Suggest from the meeting** asks the chat model for new personas fitted
+to what was said so far; it may ask up to three questions first, and only runs
+when you press the button. A persona is added **from now**, or **with a rerun**:
+it then also goes over the meeting so far, 30 s of meeting at a time, seeing only
+what had been said up to each step, and its comments appear in the timeline at
+the moment they are about, marked "added later". **Pause** stops a persona from
+commenting (and stops its rerun); **Remove** takes it out, its comments stay.
+Every change is saved in the meeting's brief, so the next meeting with that brief
+starts with it. The Comments list in the sidebar shows every comment; click one to
+jump to it in the timeline. Before Start, the brief editor can add personas from
+the library or the suggestions too. A rerun costs one decision call per 30 s of
+meeting, plus a chat call for each comment.
+
 Every probability is shown under the batch it belongs to, to help pick thresholds
 for your models (`--topic-threshold`, default 0.6; `--comment-threshold`, default
 0.5). For `replay`, `--speed` sets the speed (default 10× real time, 0 for no

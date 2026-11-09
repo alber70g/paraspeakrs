@@ -1,7 +1,8 @@
 # Live meeting: the persona package
 
-*Status: planned 2026-11-09, not started. Branch `claude/wizardly-faraday-firlh4`, uncommitted
-work from the live-speakers change is in the same tree.*
+*Status: built 2026-11-09 on branch `claude/wizardly-faraday-firlh4`. Steps 1-4 have tests
+(`test_live_personas.py`, the persona tests in `test_live_analyzer.py` and `test_live_server.py`).
+Decisions taken while building: below, accepted by the user 2026-11-09.*
 
 Goal: help steer the meeting while it runs. Personas become reusable entities, can be added,
 paused and removed during a meeting, can rerun over what was already said, and a
@@ -76,6 +77,20 @@ paused and removed during a meeting, can rerun over what was already said, and a
    - Verify: browser check with `live replay --speed 0` against fake or real models
      (chrome-devtools MCP), plus `bun build --no-bundle` on the extracted script.
 6. **Docs**: README live section, CHANGELOG, DECISIONS.md entry, memory.
+
+## Decisions taken while building (accepted 2026-11-09)
+
+- **What a rerun sees.** ← chosen: at each 30 s step, the section up to and with
+  that step, and only the comments the persona made about earlier moments. The
+  alternative, the whole section as it is now, is simpler but lets a comment about
+  minute 3 cite minute 20.
+- **Pause during a rerun.** ← chosen: pausing stops the rerun; resuming continues
+  from now only. Rejected: a rerun that waits while paused, because the end of the
+  meeting waits for reruns and would then wait for the user; and a rerun that
+  ignores the pause, because a paused persona would still cost decision calls.
+- **Keys.** ← chosen: a persona added during the meeting never gets the key of one
+  removed earlier (`scope-guard-2`), so the removed one's comments stay its own and
+  keep their colour. Colours on the page go by key, not position.
 
 ## Open points (decide while building, or ask)
 

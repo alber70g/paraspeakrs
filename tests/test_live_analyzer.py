@@ -6,7 +6,7 @@ import json
 
 from live_fakes import FakeChat, FakeDecisions, last_user, meeting_chat
 from paraspeakrs.live.analyzer import Analyzer, Thresholds
-from paraspeakrs.live.brief import Brief
+from paraspeakrs.live.brief import Brief, Persona
 from paraspeakrs.live.transcript import Line, load_lines, replay
 
 BRIEF = Brief.model_validate(
@@ -198,3 +198,98 @@ async def test_ask_drops_the_oldest_lines_when_the_meeting_is_long():
     prompt = last_user(chat.requests[-1]["messages"])
     assert "[earlier part of the meeting left out]" in prompt
     assert "point 49" in prompt and "point 0\n" not in prompt
+
+
+# -- personas added, paused and removed during the meeting ---------------------
+
+SCOPE = Persona(name="Scope guard", comment_when="work is added")
+
+
+def _fresh(decisions: FakeDecisions, chat: FakeChat, **kwargs) -> tuple[Analyzer, list[dict]]:
+    """An analyzer on its own copy of the brief: adding a persona changes the brief."""
+    events: list[dict] = []
+    analyzer = Analyzer(
+        BRIEF.model_copy(deep=True),
+        decisions.client(),
+        chat.client("m"),
+        events.append,
+        thresholds=Thresholds(min_section_seconds=30),
+        **kwargs,
+    )
+    return analyzer, events
+
+
+def _reacting_chat(messages):
+    """A comment that names the last line it reacts to, so a test can tell comments apart."""
+    prompt = last_user(messages)
+    if "The new lines you react to:\n" in prompt:
+        reacted = prompt.split("The new lines you react to:\n")[1].split("\n\n")[0].splitlines()[-1]
+        return f"re: {reacted}"
+    return meeting_chat(messages)
+
+
+def _asked(decisions: FakeDecisions, key: str) -> list[dict]:
+    return [r for r in decisions.requests if f"comment__{key}" in r["questions"]]
+
+
+async def test_a_rerun_sees_the_meeting_only_up_to_each_step():
+    """A persona added late comments on the past as if it had been there: never with hindsight."""
+    decisions = FakeDecisions(lambda key, q, state: 0.9 if key == "comment__scope-guard" else 0.0)
+    analyzer, events = _fresh(decisions, FakeChat(_reacting_chat))
+    for line in _lines(9):  # 0-90 s, one section
+        await analyzer.feed([line])
+
+    added = analyzer.add_persona(SCOPE, rerun=True)
+    await analyzer.feed([Line(90, 100, "Ben", "and the mobile app")])  # heard after the add: live
+    await analyzer.finish()
+
+    assert added.key == "scope-guard"
+    reruns = [c for c in _of(events, "comment") if c.get("rerun")]
+    live = [c for c in _of(events, "comment") if c["persona"] == "scope-guard" and not c.get("rerun")]
+    assert [c["at"] for c in reruns] == [30, 60, 90]
+    assert [c["text"] for c in live] == ["re: [00:01:30] Ben: and the mobile app"]
+    for request in _asked(decisions, "scope-guard"):
+        so_far, new = request["state"]["section_so_far"], request["state"]["new_lines"]
+        assert so_far.endswith(new.splitlines()[-1])  # nothing after the step it is about
+        if "mobile app" not in new:  # a rerun step: the live comment came later
+            assert live[0]["text"] not in json.dumps(request["state"].get("already_commented", {}))
+    assert _of(events, "rerun")[-1] == {"type": "rerun", "persona": "scope-guard", "of": 3, "done": 3, "state": "done"}
+
+
+async def test_a_paused_persona_is_not_asked_and_pausing_stops_its_rerun():
+    decisions = FakeDecisions(lambda key, q, state: 0.9)
+    analyzer, events = _fresh(decisions, FakeChat(meeting_chat))
+    for line in _lines(6):
+        await analyzer.feed([line])
+    asked_before = len(decisions.requests)
+
+    analyzer.add_persona(SCOPE, rerun=True)
+    analyzer.pause("scope-guard", True)  # before the rerun got a turn
+    await analyzer.feed([Line(60, 70, "Ben", "more")])
+    await analyzer.finish()
+
+    assert _asked(decisions, "scope-guard") == []
+    assert len(decisions.requests) > asked_before  # the others still are
+    assert _of(events, "rerun")[-1]["state"] == "stopped"
+    assert _of(events, "personas")[-1]["paused"] == ["scope-guard"]
+
+    analyzer.pause("scope-guard", False)
+    await analyzer.feed([Line(70, 80, "Ben", "again")])
+    assert len(_asked(decisions, "scope-guard")) == 1
+
+
+async def test_a_removed_persona_keeps_its_comments_and_its_key():
+    decisions = FakeDecisions(lambda key, q, state: 0.9 if key == "comment__scope-guard" else 0.0)
+    analyzer, events = _fresh(decisions, FakeChat(meeting_chat))
+    analyzer.add_persona(SCOPE, rerun=False)
+    await analyzer.feed([Line(0, 10, "Anna", "add the app")])
+
+    analyzer.remove("scope-guard")
+    await analyzer.feed([Line(10, 20, "Anna", "and the web")])
+    again = analyzer.add_persona(SCOPE, rerun=False)
+
+    assert [c["persona"] for c in analyzer.comments] == ["scope-guard"]
+    assert len(_asked(decisions, "scope-guard")) == 1
+    # Added again, it is a new persona: the old comments stay with the old key.
+    assert again.key == "scope-guard-2"
+    assert [p["key"] for p in _of(events, "personas")[-1]["personas"]] == ["owner-hawk", "budget-keeper", "scope-guard-2"]

@@ -8,7 +8,9 @@ history lives with the caller, so a web page can hold it and post it back each t
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import TypeVar
 
 from pydantic import ValidationError
 
@@ -16,6 +18,7 @@ from .brief import Brief
 from .chat import ChatClient, ChatError
 
 MAX_QUESTIONS = 10
+T = TypeVar("T")
 
 SYSTEM_PROMPT = """\
 You prepare a live meeting assistant for one specific meeting by interviewing the user before it starts.
@@ -89,39 +92,48 @@ async def next_turn(chat: ChatClient, history: list[dict[str, str]], *, max_ques
     if asked >= max_questions and history[-1]["content"] != FINISH_NOW:
         messages.append({"role": "user", "content": FINISH_NOW})
 
+    return await ask_json(chat, messages, lambda reply: _turn(history, reply), what="questionnaire")
+
+
+async def ask_json(chat: ChatClient, messages: list[dict], parse: Callable[[dict], T], *, what: str) -> T:
+    """The model's JSON reply, parsed; a reply of the wrong shape is sent back once to be fixed."""
     reply = await chat.complete_json(messages, temperature=0.4)
     try:
-        return _turn(history, reply)
+        return parse(reply)
     except (ValidationError, ValueError) as exc:
         # One correction round: local models get the shape right more often than not.
         retry = [
             *messages,
-            {"role": "assistant", "content": _dump(reply)},
+            {"role": "assistant", "content": dump(reply)},
             {"role": "user", "content": f"That reply does not fit the required shape ({exc}). Send it again, fixed."},
         ]
         reply = await chat.complete_json(retry, temperature=0.2)
         try:
-            return _turn(history, reply)
+            return parse(reply)
         except (ValidationError, ValueError) as exc2:
-            raise ChatError(f"the questionnaire model sent an unusable reply: {exc2}") from exc2
+            raise ChatError(f"the {what} model sent an unusable reply: {exc2}") from exc2
+
+
+def parse_question(reply: dict) -> IntakeQuestion | None:
+    """The question in a reply of type "question", or None for another type."""
+    if not (reply.get("type") == "question" or (reply.get("type") is None and "question" in reply)):
+        return None
+    question = str(reply.get("question", "")).strip()
+    if not question:
+        raise ValueError("the question is empty")
+    options = [str(o).strip() for o in reply.get("options") or [] if str(o).strip()][:4]
+    return IntakeQuestion(question=question, options=options, why=str(reply.get("why", "")).strip())
 
 
 def _turn(history: list[dict[str, str]], reply: dict) -> IntakeTurn:
     kind = reply.get("type")
-    new_history = [*history, {"role": "assistant", "content": _dump(reply)}]
+    new_history = [*history, {"role": "assistant", "content": dump(reply)}]
     if kind == "brief" or (kind is None and "brief" in reply):
         return IntakeTurn(history=new_history, brief=Brief.model_validate(reply["brief"]))
-    if kind == "question" or (kind is None and "question" in reply):
-        question = str(reply.get("question", "")).strip()
-        if not question:
-            raise ValueError("the question is empty")
-        options = [str(o).strip() for o in reply.get("options") or [] if str(o).strip()][:4]
-        return IntakeTurn(
-            history=new_history,
-            question=IntakeQuestion(question=question, options=options, why=str(reply.get("why", "")).strip()),
-        )
+    if question := parse_question(reply):
+        return IntakeTurn(history=new_history, question=question)
     raise ValueError("type must be 'question' or 'brief'")
 
 
-def _dump(reply: dict) -> str:
+def dump(reply: dict) -> str:
     return json.dumps(reply, ensure_ascii=False)

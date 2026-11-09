@@ -2,17 +2,21 @@
 
 Each batch of new lines costs at most two decision calls, which JEV answers in well
 under a second: one asks whether the topic changed and on which line, the other asks
-every persona at once whether the new lines give it something to say. Only a yes
-costs a chat call.
+every active persona at once whether the new lines give it something to say. Only a
+yes costs a chat call.
+
+Personas can be added, paused and removed while the meeting runs. One added with a
+rerun also goes over what was said before it joined, a ``rerun_step`` of meeting at
+a time, and sees only what had been said up to each step.
 """
 
 from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
-from .brief import Brief, Persona
+from .brief import Brief, Persona, persona_key
 from .chat import ChatClient, ChatError
 from .decisions import Answer, ChoiceAnswer, DecisionClient, DecisionError, NoulAnswer, choice, noul
 from .transcript import Line, render
@@ -44,7 +48,6 @@ class Section:
     lines: list[Line]
     title: str = ""
     closed: bool = False
-    comments: dict[str, list[str]] = field(default_factory=dict)
 
     @property
     def start(self) -> float:
@@ -59,9 +62,13 @@ class Section:
         return self.end - self.start
 
     def text(self, max_chars: int) -> str:
-        """The section's transcript, cut from the front when it is too long."""
-        text = render(self.lines)
-        return text if len(text) <= max_chars else "…" + text[-max_chars:]
+        return _text(self.lines, max_chars)
+
+
+def _text(lines: Sequence[Line], max_chars: int) -> str:
+    """The transcript of ``lines``, cut from the front when it is too long."""
+    text = render(lines)
+    return text if len(text) <= max_chars else "…" + text[-max_chars:]
 
 
 class Analyzer:
@@ -75,6 +82,7 @@ class Analyzer:
         thresholds: Thresholds | None = None,
         state_chars: int = 6000,
         ask_chars: int = 40000,
+        rerun_step: float = 30.0,
     ) -> None:
         self.brief = brief
         self.decisions = decisions
@@ -83,9 +91,13 @@ class Analyzer:
         self.thresholds = thresholds or Thresholds()
         self.state_chars = state_chars
         self.ask_chars = ask_chars
+        self.rerun_step = rerun_step
         self.sections: list[Section] = []
         self.comments: list[dict] = []
+        self.paused: set[str] = set()
         self._background: set[asyncio.Task] = set()
+        # Per persona: its rerun, and the progress last reported.
+        self._reruns: dict[str, tuple[asyncio.Task, dict]] = {}
         self._last_error: dict[str, str] = {}
 
     @property
@@ -131,7 +143,7 @@ class Analyzer:
         )
 
     async def finish(self) -> None:
-        """The meeting ended: close the last section and wait for pending titles."""
+        """The meeting ended: close the last section and wait for pending titles and reruns."""
         if self.current is not None:
             self._close(self.current)
         while self._background:
@@ -149,6 +161,71 @@ class Analyzer:
         answer = await self.chat.complete([{"role": "system", "content": system}, {"role": "user", "content": user}])
         self.emit({"type": "answer", "question": question, "answer": answer, "at": lines[-1].end if lines else 0})
         return answer
+
+    # -- personas -----------------------------------------------------------
+
+    def add_persona(self, persona: Persona, *, rerun: bool) -> Persona:
+        """Add a persona from now on; with ``rerun``, it also goes over the meeting so far."""
+        # Never the key of a persona that was removed: its comments stay hers.
+        taken = {p.key for p in self.brief.personas} | {c["persona"] for c in self.comments}
+        persona = persona.model_copy(update={"key": persona_key(persona, taken)})
+        self.brief.personas.append(persona)
+        self._personas_changed()
+        if rerun and self.sections:
+            # The sections as they are now; lines heard from here on reach it through feed.
+            steps = [
+                (section, section.lines[:end], section.lines[start:end])
+                for section in self.sections
+                for start, end in _steps(section.lines, self.rerun_step)
+            ]
+            progress = {"type": "rerun", "persona": persona.key, "of": len(steps), "done": 0, "state": "running"}
+            self.emit(dict(progress))
+            task = asyncio.create_task(self._rerun(persona, steps, progress))
+            self._reruns[persona.key] = (task, progress)
+            self._background.add(task)
+            task.add_done_callback(self._background.discard)
+        return persona
+
+    def pause(self, key: str, paused: bool) -> None:
+        """A paused persona is not asked; pausing also stops its rerun, and resuming goes on from now."""
+        self.brief.persona(key)  # KeyError for an unknown key
+        if paused:
+            self.paused.add(key)
+            self._stop_rerun(key)
+        else:
+            self.paused.discard(key)
+        self._personas_changed()
+
+    def remove(self, key: str) -> None:
+        """The persona leaves the meeting; what it said stays."""
+        self.brief.personas.remove(self.brief.persona(key))
+        self.paused.discard(key)
+        self._stop_rerun(key)
+        self._personas_changed()
+
+    def _stop_rerun(self, key: str) -> None:
+        task, progress = self._reruns.pop(key, (None, None))
+        if task is not None and not task.done():
+            task.cancel()
+            progress["state"] = "stopped"
+            self.emit(dict(progress))
+
+    def _personas_changed(self) -> None:
+        self.emit(
+            {
+                "type": "personas",
+                "personas": [p.model_dump() for p in self.brief.personas],
+                "paused": sorted(self.paused),
+            }
+        )
+
+    async def _rerun(self, persona: Persona, steps: list[tuple[Section, list[Line], list[Line]]], progress: dict) -> None:
+        for section, so_far, lines in steps:
+            await self._ask_personas([persona], section, so_far, lines, rerun=True)
+            progress["done"] += 1
+            if progress["done"] == progress["of"]:
+                progress["state"] = "done"
+            self.emit(dict(progress))
 
     # -- sections -----------------------------------------------------------
 
@@ -215,15 +292,22 @@ class Analyzer:
     # -- comments -----------------------------------------------------------
 
     async def _consider_comments(self, section: Section, lines: list[Line]) -> dict[str, float]:
-        personas = self.brief.personas
+        active = [p for p in self.brief.personas if p.key not in self.paused]
+        return await self._ask_personas(active, section, section.lines, lines)
+
+    async def _ask_personas(
+        self, personas: list[Persona], section: Section, so_far: list[Line], lines: list[Line], *, rerun: bool = False
+    ) -> dict[str, float]:
+        """One decision call for these personas about ``lines``; ``so_far`` is the section up to and with them."""
         if not personas:
             return {}
         state: dict = {
             "meeting": self.brief.meeting_state(),
-            "section_so_far": section.text(self.state_chars),
+            "section_so_far": _text(so_far, self.state_chars),
             "new_lines": render(lines),
         }
-        already = {key: said for key, said in section.comments.items() if said}
+        until = lines[-1].end
+        already = {p.key: said for p in personas if (said := self._said(section, p.key, until))}
         if already:
             state["already_commented"] = already
         questions = {f"comment__{p.key}": self._comment_question(p, p.key in already) for p in personas}
@@ -232,8 +316,15 @@ class Analyzer:
             return {}
         probabilities = {p.key: _p(answers, f"comment__{p.key}") for p in personas}
         speaking = [p for p in personas if probabilities[p.key] >= self.thresholds.comment]
-        await asyncio.gather(*(self._comment(p, section, lines, probabilities[p.key]) for p in speaking))
+        await asyncio.gather(
+            *(self._comment(p, section, so_far, lines, probabilities[p.key], rerun=rerun) for p in speaking)
+        )
         return probabilities
+
+    def _said(self, section: Section, key: str, until: float) -> list[str]:
+        """What the persona said in the section about lines up to ``until``: a rerun must not see later comments."""
+        said = [c for c in self.comments if c["section"] == section.index and c["persona"] == key and c["at"] <= until]
+        return [c["text"] for c in sorted(said, key=lambda c: c["at"])]
 
     @staticmethod
     def _comment_question(persona: Persona, has_spoken: bool) -> dict:
@@ -243,7 +334,9 @@ class Analyzer:
             instructions += f", and do not count what `already_commented.{persona.key}` already covers"
         return noul(instructions + ".", true=persona.comment_when, false=persona.skip_when or SKIP_DEFAULT)
 
-    async def _comment(self, persona: Persona, section: Section, lines: list[Line], p: float) -> None:
+    async def _comment(
+        self, persona: Persona, section: Section, so_far: list[Line], lines: list[Line], p: float, *, rerun: bool
+    ) -> None:
         language = self.brief.language or "the language of the meeting"
         style = persona.style or (
             "One or two short sentences: a pointed question, a risk or a suggestion. "
@@ -256,16 +349,13 @@ class Analyzer:
             + f"{style}\nWrite in {language}.\n\n"
             + f"About this meeting:\n{self.brief.context_text()}"
         )
-        user = f"The section so far:\n{section.text(self.state_chars)}\n\nThe new lines you react to:\n{render(lines)}"
-        if section.comments.get(persona.key):
-            user += "\n\nWhat you already said in this section:\n" + "\n".join(
-                f"- {c}" for c in section.comments[persona.key]
-            )
+        user = f"The section so far:\n{_text(so_far, self.state_chars)}\n\nThe new lines you react to:\n{render(lines)}"
+        if said := self._said(section, persona.key, lines[-1].end):
+            user += "\n\nWhat you already said in this section:\n" + "\n".join(f"- {c}" for c in said)
         user += "\n\nWrite your comment."
         text = await self._chat([{"role": "system", "content": system}, {"role": "user", "content": user}])
         if not text:
             return
-        section.comments.setdefault(persona.key, []).append(text)
         comment = {
             "type": "comment",
             "section": section.index,
@@ -275,6 +365,8 @@ class Analyzer:
             "at": lines[-1].end,
             "text": text,
         }
+        if rerun:
+            comment["rerun"] = True  # written later, about this moment
         self.comments.append(comment)
         self.emit(comment)
 
@@ -329,6 +421,19 @@ class Analyzer:
         if self._last_error.get(where) != message:
             self._last_error[where] = message
             self.emit({"type": "error", "where": where, "message": message})
+
+
+def _steps(lines: Sequence[Line], step: float) -> list[tuple[int, int]]:
+    """``lines`` cut into runs of about ``step`` seconds, as (start, end) indexes."""
+    out: list[tuple[int, int]] = []
+    start = 0
+    for i, line in enumerate(lines):
+        if line.end - lines[start].start >= step:
+            out.append((start, i + 1))
+            start = i + 1
+    if start < len(lines):
+        out.append((start, len(lines)))
+    return out
 
 
 def _p(answers: dict[str, Answer], key: str) -> float:

@@ -79,6 +79,17 @@ details summary { cursor: pointer; color: var(--muted); font-size: 13px; }
 .chips button { padding: 3px 10px; font-size: 13px; border-radius: 999px; }
 #marks div { color: var(--muted); }
 #marks div.named { color: var(--text); }
+.comment.flash { background: color-mix(in srgb, var(--c) 30%, transparent); }
+.tag { font-size: 11px; color: var(--muted); margin-left: 6px; }
+button.sm { padding: 3px 9px; font-size: 13px; }
+.persona .row { margin-top: 4px; }
+.adder { margin-top: 10px; }
+.adder .item { border-top: 1px solid var(--line); padding: 8px 0; }
+.adder .item .row { margin-top: 4px; }
+#comments-list { max-height: 260px; overflow: auto; }
+.cm { display: grid; grid-template-columns: 62px minmax(0, 1fr); gap: 2px 8px; padding: 4px 8px; margin-bottom: 4px; border-left: 3px solid var(--c); cursor: pointer; border-radius: 0 6px 6px 0; }
+.cm:hover { background: color-mix(in srgb, var(--c) 9%, transparent); }
+.cm .t { color: var(--muted); font: 12px/1.6 var(--mono); }
 [hidden] { display: none !important; }
 </style>
 </head>
@@ -143,6 +154,7 @@ details summary { cursor: pointer; color: var(--muted); font-size: 13px; }
         <summary>Edit as JSON</summary>
         <textarea class="json" id="brief-json" spellcheck="false"></textarea>
       </details>
+      <div id="add-brief"></div>
       <div class="row">
         <button class="primary" id="start">Start meeting</button>
       </div>
@@ -158,7 +170,13 @@ details summary { cursor: pointer; color: var(--muted); font-size: 13px; }
     <div id="personabox" hidden>
       <h2>Personas</h2>
       <div id="personas"></div>
+      <div id="add-running"></div>
       <details><summary>Brief</summary><div id="brief-running" class="small"></div></details>
+    </div>
+
+    <div id="commentbox" hidden>
+      <h2>Comments</h2>
+      <div id="comments-list"></div>
     </div>
   </aside>
 </main>
@@ -174,9 +192,21 @@ let personaColor = {};
 let personaName = {};
 let sourceSeconds = 0;
 let started = false;
+let currentPersonas = [];
+let pausedKeys = [];
+let reruns = {};
 
-async function api(path, body) {
-  const res = await fetch(path, body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+// A key keeps its colour and name for the whole meeting, also after the persona is removed.
+function colorFor(key) {
+  if (!personaColor[key]) personaColor[key] = `var(--p${(Object.keys(personaColor).length % 6) + 1})`;
+  return personaColor[key];
+}
+function rememberPersonas(list) { for (const p of list) { colorFor(p.key); personaName[p.key] = p.name; } }
+
+async function api(path, body, method) {
+  const init = { method: method || (body === undefined ? "GET" : "POST") };
+  if (body !== undefined) { init.headers = { "Content-Type": "application/json" }; init.body = JSON.stringify(body); }
+  const res = await fetch(path, init);
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail || data));
   return data;
@@ -283,7 +313,7 @@ function renderBrief(target, b) {
   if (b.participants && b.participants.length) add("Participants", b.participants.map((p) => p.name + (p.role ? ` (${p.role})` : "")).join(", "));
   (b.personas || []).forEach((p, i) => {
     const d = el("div", "persona small");
-    d.style.setProperty("--c", `var(--p${(i % 6) + 1})`);
+    d.style.setProperty("--c", personaColor[p.key] || `var(--p${(i % 6) + 1})`);
     d.append(el("b", "", p.name));
     if (p.viewpoint) d.append(el("div", "muted", p.viewpoint));
     d.append(el("div", "", `Comments when: ${p.comment_when}`));
@@ -306,20 +336,183 @@ function running(b) {
   started = true;
   brief = b;
   $("title").textContent = b.title || "Live meeting";
-  personaColor = {}; personaName = {};
-  (b.personas || []).forEach((p, i) => { personaColor[p.key] = `var(--p${(i % 6) + 1})`; personaName[p.key] = p.name; });
+  currentPersonas = b.personas || [];
+  pausedKeys = [];
+  reruns = {};
+  rememberPersonas(currentPersonas);
   show("askbox", "personabox");
-  const list = $("personas");
-  list.replaceChildren();
-  (b.personas || []).forEach((p) => {
-    const d = el("div", "persona small");
-    d.style.setProperty("--c", personaColor[p.key]);
-    d.append(el("b", "", p.name), el("div", "muted", p.comment_when));
-    list.append(d);
-  });
+  $("commentbox").hidden = false;
+  renderPersonas();
   renderBrief($("brief-running"), b);
   renderNowNames();
 }
+
+function rerunText(r) {
+  if (r.state === "running") return `Going over the meeting so far: ${r.done}/${r.of}`;
+  if (r.state === "stopped") return `Stopped at ${r.done}/${r.of}`;
+  return "Went over the meeting so far";
+}
+
+function button(row, label, fn) {
+  const b = el("button", "sm", label);
+  b.onclick = async () => { b.disabled = true; try { await fn(b); } catch (e) { showError(`${label}: ${e.message}`); } finally { b.disabled = false; } };
+  row.append(b);
+}
+
+const saveToLibrary = async (p, b) => {
+  await api("/api/personas/library", { persona: p });
+  b.textContent = "Saved";
+  adders.forEach((a) => a.loadLibrary());
+};
+
+function renderPersonas() {
+  const list = $("personas");
+  list.replaceChildren();
+  if (!currentPersonas.length) list.append(el("p", "muted small", "No personas."));
+  for (const p of currentPersonas) {
+    const paused = pausedKeys.includes(p.key);
+    const d = el("div", "persona small");
+    d.style.setProperty("--c", colorFor(p.key));
+    const head = el("div");
+    head.append(el("b", "", p.name));
+    if (paused) head.append(el("span", "tag", "paused"));
+    d.append(head, el("div", "muted", p.comment_when));
+    if (reruns[p.key]) d.append(el("div", "muted", rerunText(reruns[p.key])));
+    const row = el("div", "row");
+    button(row, paused ? "Resume" : "Pause", () => api(`/api/personas/${encodeURIComponent(p.key)}/pause`, { paused: !paused }));
+    button(row, "Remove", async () => { if (confirm(`Remove ${p.name}?`)) await api(`/api/personas/${encodeURIComponent(p.key)}`, undefined, "DELETE"); });
+    button(row, "Save to library", (b) => saveToLibrary(p, b));
+    d.append(row);
+    list.append(d);
+  }
+}
+
+// ---- adding personas (library and suggestions), before Start into the brief, after Start into the meeting ----
+
+const adders = [];
+
+function addToBrief(p) {
+  let b;
+  try { b = JSON.parse($("brief-json").value); } catch (e) { return showError(`The brief is not valid JSON: ${e.message}`); }
+  b.personas = [...(b.personas || []), p];
+  brief = b;
+  $("brief-json").value = JSON.stringify(b, null, 2);
+  renderBrief($("brief-view"), b);
+}
+
+function makeAdder(host, live) {
+  const toggle = el("button", "", "Add persona");
+  const body = el("div", "adder");
+  body.hidden = true;
+  const lib = el("div");
+  const wish = el("input");
+  wish.type = "text";
+  wish.placeholder = "What should the new persona watch for?";
+  const go = el("button", "", live ? "Suggest from the meeting" : "Suggest personas");
+  const qbox = el("div", "item");
+  qbox.hidden = true;
+  const question = el("p"), why = el("p", "muted small"), options = el("div", "options");
+  const own = el("input");
+  own.type = "text";
+  own.placeholder = "Or answer in your own words";
+  const qrow = el("div", "row");
+  const thinking = el("p", "muted small", "Thinking…");
+  thinking.hidden = true;
+  const props = el("div");
+  qbox.append(question, why, options, own, qrow);
+  const sugRow = el("div", "row");
+  sugRow.append(go);
+  const libHead = el("p", "small");
+  libHead.append(el("b", "", "Library"));
+  const sugHead = el("p", "small");
+  sugHead.style.marginTop = "12px";
+  sugHead.append(el("b", "", "Suggestions"));
+  body.append(libHead, lib, sugHead, wish, sugRow, qbox, thinking, props);
+  host.append(toggle, body);
+
+  const actions = (p, save) => {
+    const row = el("div", "row");
+    if (live) {
+      button(row, "Add from now", () => api("/api/personas", { persona: p, rerun: false }));
+      button(row, "Add and rerun", () => api("/api/personas", { persona: p, rerun: true }));
+    } else button(row, "Add to brief", async () => addToBrief(p));
+    if (save) button(row, "Save to library", (b) => saveToLibrary(p, b));
+    return row;
+  };
+
+  const adder = {
+    async loadLibrary() {
+      if (body.hidden) return;
+      try {
+        const items = await api("/api/personas/library");
+        lib.replaceChildren();
+        for (const { persona: p, builtin } of items) {
+          const d = el("div", "item small");
+          const head = el("div");
+          head.append(el("b", "", p.name));
+          if (builtin) head.append(el("span", "tag", "built-in"));
+          d.append(head, el("div", "muted", p.comment_when));
+          const row = actions(p, false);
+          if (!builtin) button(row, "Delete", async () => { await api(`/api/personas/library/${encodeURIComponent(p.key)}`, undefined, "DELETE"); adders.forEach((a) => a.loadLibrary()); });
+          d.append(row);
+          lib.append(d);
+        }
+      } catch (e) { showError(`Library: ${e.message}`); }
+    },
+  };
+  adders.push(adder);
+  toggle.onclick = () => { body.hidden = !body.hidden; adder.loadLibrary(); };
+
+  let hist = [];
+  const busy = (on) => {
+    thinking.hidden = !on;
+    go.disabled = on;
+    for (const b of qbox.querySelectorAll("button")) b.disabled = on;
+  };
+  async function turn(next) {
+    busy(true);
+    try {
+      const d = await api("/api/personas/suggest", { history: next });
+      hist = d.history;
+      render(d);
+    } catch (e) { showError(`Suggest personas: ${e.message}`); }
+    finally { busy(false); }
+  }
+  function reply(text) {
+    if (!text.trim() || !thinking.hidden) return;
+    turn([...hist, { role: "user", content: text.trim() }]);
+  }
+  function render(d) {
+    qbox.hidden = !d.question;
+    if (d.question) {
+      question.textContent = d.question.question;
+      why.textContent = d.question.why || "";
+      options.replaceChildren(...d.question.options.map((o) => { const b = el("button", "", o); b.onclick = () => reply(o); return b; }));
+      own.value = "";
+    }
+    props.replaceChildren();
+    if (!d.question && !(d.personas || []).length) props.append(el("p", "muted small", "No personas proposed. Try another wish."));
+    for (const p of d.personas || []) {
+      const c = el("div", "item small");
+      c.append(el("b", "", p.name));
+      if (p.viewpoint) c.append(el("div", "muted", p.viewpoint));
+      c.append(el("div", "", `Comments when: ${p.comment_when}`));
+      if (p.skip_when) c.append(el("div", "muted", `Stays quiet when: ${p.skip_when}`));
+      c.append(actions(p, true));
+      props.append(c);
+    }
+  }
+  const send = el("button", "primary", "Send");
+  send.onclick = () => reply(own.value);
+  const now = el("button", "", "Propose now");
+  now.onclick = () => reply("Propose the personas now with what you know.");
+  qrow.append(send, now);
+  own.addEventListener("keydown", (e) => { if (e.key === "Enter") reply(own.value); });
+  go.onclick = () => { hist = []; qbox.hidden = true; props.replaceChildren(); turn([{ role: "user", content: wish.value.trim() || "Propose personas for this meeting." }]); };
+}
+
+makeAdder($("add-brief"), false);
+makeAdder($("add-running"), true);
 
 // At equal times, what was said about the batch that just ended comes before the next section and line.
 const ORDER = { dec: 0, comment: 1, sec: 2, line: 3 };
@@ -374,9 +567,24 @@ const handlers = {
   },
   comment(e) {
     const node = el("div", "comment");
-    node.style.setProperty("--c", personaColor[e.persona] || "var(--accent)");
+    node.id = `c-${e.seq}`;
+    node.style.setProperty("--c", colorFor(e.persona));
     node.append(el("b", "", `${e.name} `), document.createTextNode(e.text), el("span", "prob", `p ${p2(e.p)}`));
+    if (e.rerun) node.append(el("span", "tag", "added later"));
     place(node, e.at, "comment");
+    listComment(e);
+  },
+  personas(e) {
+    currentPersonas = e.personas;
+    pausedKeys = e.paused || [];
+    rememberPersonas(currentPersonas);
+    renderPersonas();
+    // The server saved the brief with these personas; show it as saved.
+    if (brief) { brief.personas = e.personas; renderBrief($("brief-running"), brief); }
+  },
+  rerun(e) {
+    reruns[e.persona] = e;
+    renderPersonas();
   },
   answer(e) {
     const qa = el("div", "qa");
@@ -395,6 +603,31 @@ const handlers = {
     else node.textContent = e.detail || e.state;
   },
 };
+
+// ---- comments sidebar --------------------------------------------------------
+
+function listComment(e) {
+  $("commentbox").hidden = false;
+  const node = el("div", "cm");
+  node.dataset.at = e.at;
+  node.style.setProperty("--c", colorFor(e.persona));
+  const text = e.text.length > 80 ? `${e.text.slice(0, 80)}…` : e.text;
+  const body = el("div");
+  body.append(el("b", "", `${e.name} `), document.createTextNode(text));
+  if (e.rerun) body.append(el("span", "tag", "added later"));
+  node.append(el("span", "t", fmt(e.at)), body);
+  node.onclick = () => {
+    const target = $(`c-${e.seq}`);
+    if (!target) return;
+    target.scrollIntoView({ behavior: "smooth", block: "center" });
+    target.classList.add("flash");
+    setTimeout(() => target.classList.remove("flash"), 2000);
+  };
+  const list = $("comments-list");
+  let before = null;
+  for (let c = list.lastElementChild; c && +c.dataset.at > e.at; c = c.previousElementSibling) before = c;
+  list.insertBefore(node, before);
+}
 
 // ---- speakers --------------------------------------------------------------
 

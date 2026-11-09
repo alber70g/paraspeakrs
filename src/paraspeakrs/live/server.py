@@ -24,11 +24,12 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel, ValidationError
 
 from .analyzer import Analyzer, Thresholds
-from .brief import Brief, load_brief, save_brief, slug
+from .brief import Brief, Persona, load_brief, save_brief, slug
 from .chat import ChatClient, ChatError
 from .decisions import DecisionClient
 from .intake import next_turn
-from .transcript import Line, replay
+from .personas import PersonaLibrary, PersonaTurn, next_persona_turn
+from .transcript import Line, render, replay
 
 KEEPALIVE_SECONDS = 15.0
 # Analysis that fell behind takes what piled up in pieces of at most this much meeting,
@@ -130,12 +131,15 @@ class LiveSession:
         thresholds: Thresholds | None = None,
         brief: Brief | None = None,
         step: float = 30.0,
+        personas_dir: Path | None = None,
     ) -> None:
         self.source = source
         self.decisions = decisions
         self.chat = chat
         self.session_dir = session_dir
         self.briefs_dir = briefs_dir
+        # <workspace>/live/personas, next to the briefs.
+        self.library = PersonaLibrary(personas_dir or briefs_dir.parent / "personas")
         self.thresholds = thresholds or Thresholds()
         self.brief = brief
         self.step = step
@@ -179,13 +183,39 @@ class LiveSession:
         if self.state != "waiting":
             raise SessionStateError("this meeting has already started")
         self.brief = brief
-        save_brief(brief, self.session_dir / "brief.json")
-        save_brief(brief, self.briefs_dir / f"{slug(brief.title) or 'meeting'}.json")
+        self._save_brief()
         self.analyzer = Analyzer(brief, self.decisions, self.chat, self.emit, thresholds=self.thresholds)
         self.state = "running"
         self.emit({"type": "status", "state": "running", "brief": brief.model_dump()})
         self._start_pump()
         self._task = asyncio.create_task(self._consume())
+
+    def _save_brief(self) -> None:
+        """In the session, and as the reusable brief for the next meeting with this title."""
+        assert self.brief is not None
+        save_brief(self.brief, self.session_dir / "brief.json")
+        save_brief(self.brief, self.briefs_dir / f"{slug(self.brief.title) or 'meeting'}.json")
+
+    async def suggest_personas(self, history: list[dict[str, str]]) -> PersonaTurn:
+        """The persona questionnaire, before or during the meeting, reading what was said so far."""
+        return await next_persona_turn(self.chat, history, brief=self.brief, transcript=render(self._named(self.heard)))
+
+    def add_persona(self, persona: Persona, *, rerun: bool) -> Persona:
+        added = self._running().add_persona(persona, rerun=rerun)
+        self._save_brief()
+        return added
+
+    def pause_persona(self, key: str, paused: bool) -> None:
+        self._running().pause(key, paused)
+
+    def remove_persona(self, key: str) -> None:
+        self._running().remove(key)
+        self._save_brief()
+
+    def _running(self) -> Analyzer:
+        if self.analyzer is None:
+            raise SessionStateError("start the meeting first")
+        return self.analyzer
 
     async def ask(self, question: str) -> str:
         if self.analyzer is None:
@@ -302,6 +332,13 @@ class LiveSession:
             self._subscribers.discard(queue)
 
 
+def _persona(data: dict) -> Persona:
+    try:
+        return Persona.model_validate(data)
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 def _sse(event: dict) -> str:
     return f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
 
@@ -320,6 +357,15 @@ class AskRequest(BaseModel):
 
 class NameRequest(BaseModel):
     name: str | None = None
+
+
+class PersonaRequest(BaseModel):
+    persona: dict
+    rerun: bool = False
+
+
+class PauseRequest(BaseModel):
+    paused: bool
 
 
 def create_app(session: LiveSession) -> FastAPI:
@@ -420,6 +466,66 @@ def create_app(session: LiveSession) -> FastAPI:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=f"no speaker {voice_id!r}") from exc
+
+    @app.get("/api/personas/library")
+    def persona_library() -> list[dict]:
+        return session.library.list()
+
+    @app.post("/api/personas/library")
+    def save_to_library(request: PersonaRequest) -> dict:
+        return {"persona": session.library.save(_persona(request.persona)).model_dump()}
+
+    @app.delete("/api/personas/library/{key}")
+    def delete_from_library(key: str) -> dict:
+        try:
+            session.library.delete(key)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=f"no saved persona {key!r}") from exc
+        return {"personas": session.library.list()}
+
+    @app.post("/api/personas/suggest")
+    async def suggest_personas(request: IntakeRequest) -> dict:
+        try:
+            turn = await session.suggest_personas(request.history)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except ChatError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        return {
+            "history": turn.history,
+            "question": turn.question.__dict__ if turn.question else None,
+            "personas": [p.model_dump() for p in turn.personas],
+        }
+
+    @app.post("/api/personas")
+    async def add_persona(request: PersonaRequest) -> dict:
+        persona = _persona(request.persona)
+        try:
+            # In the event loop: a rerun is a task there.
+            added = session.add_persona(persona, rerun=request.rerun)
+        except SessionStateError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return {"persona": added.model_dump()}
+
+    @app.post("/api/personas/{key}/pause")
+    async def pause_persona(key: str, request: PauseRequest) -> dict:
+        try:
+            session.pause_persona(key, request.paused)
+        except SessionStateError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=f"no persona {key!r} in this meeting") from exc
+        return {"paused": request.paused}
+
+    @app.delete("/api/personas/{key}")
+    async def remove_persona(key: str) -> dict:
+        try:
+            session.remove_persona(key)
+        except SessionStateError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=f"no persona {key!r} in this meeting") from exc
+        return {"removed": key}
 
     @app.get("/api/events")
     async def events() -> StreamingResponse:

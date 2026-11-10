@@ -85,7 +85,7 @@ class DecisionClient:
         *,
         api_key: str | None = None,
         client: httpx.AsyncClient | None = None,
-        timeout: float = 30.0,
+        timeout: float = 120.0,
     ) -> None:
         self.url = url
         self.model = model
